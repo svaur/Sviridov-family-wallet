@@ -14,6 +14,7 @@ import ru.sviridov.wallet.domain.TransactionRepository;
 import ru.sviridov.wallet.parser.ParsedRow;
 import ru.sviridov.wallet.parser.ParsedStatement;
 import ru.sviridov.wallet.parser.StatementParser;
+import ru.sviridov.wallet.web.CardMismatchException;
 import ru.sviridov.wallet.web.dto.StatementImportResponse;
 
 import java.math.BigDecimal;
@@ -24,9 +25,11 @@ import java.util.Optional;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -47,7 +50,7 @@ class StatementServiceTest {
 
     @BeforeEach
     void stubSave() {
-        when(statementRepository.save(any(Statement.class))).thenAnswer(inv -> inv.getArgument(0));
+        lenient().when(statementRepository.save(any(Statement.class))).thenAnswer(inv -> inv.getArgument(0));
     }
 
     private static ParsedStatement statementOf(ParsedRow... rows) {
@@ -106,5 +109,18 @@ class StatementServiceTest {
         assertThat(resp.importedCount()).isEqualTo(0);
         assertThat(resp.status()).isEqualTo("PARTIAL");
         assertThat(resp.unrecognizedRows()).hasSize(1);
+    }
+
+    @Test
+    void blocksImportOnCardMismatch() throws Exception {
+        Long userId = 1L, cardId = 10L;
+        Card card = new Card(userId, "Main", "Bank", "9999", "RUB"); // selected last4 = 9999
+        when(cardRepository.findByIdAndUserId(cardId, userId)).thenReturn(Optional.of(card));
+        ParsedStatement parsed = statementOf(debit(1, "2026-09-05", "100.00", "Магазин А"));
+        // parsed.cardNumber = "2202XXXXXXXX1234" → extracted last4 = 1234 ≠ 9999
+        when(parser.parse(any(byte[].class))).thenReturn(parsed);
+
+        assertThatThrownBy(() -> service.importStatement(userId, cardId, new byte[]{1}))
+                .isInstanceOf(CardMismatchException.class);
     }
 }

@@ -56,6 +56,7 @@ export function StatementsPage() {
   const [error, setError] = useState<string | null>(null)
   const [uploading, setUploading] = useState(false)
   const [result, setResult] = useState<ImportResult | null>(null)
+  const [mismatch, setMismatch] = useState<string | null>(null)
 
   const id = Number(cardId)
 
@@ -87,12 +88,17 @@ export function StatementsPage() {
     setUploading(true)
     setError(null)
     setResult(null)
+    setMismatch(null)
     try {
       setResult(await api.upload<ImportResult>(`/api/cards/${id}/statements`, file))
       input.value = ''
       await load()
     } catch (err) {
-      setError(err instanceof HttpError ? err.message : 'Не удалось загрузить выписку')
+      if (err instanceof HttpError && err.status === 409) {
+        setMismatch(err.message)
+      } else {
+        setError(err instanceof HttpError ? err.message : 'Не удалось загрузить выписку')
+      }
     } finally {
       setUploading(false)
     }
@@ -123,6 +129,15 @@ export function StatementsPage() {
             </button>
           </div>
         </form>
+
+        {mismatch && (
+          <div className="warning">
+            <p>{mismatch}</p>
+            <Link className="link-btn" to="/">
+              Создать карту
+            </Link>
+          </div>
+        )}
 
         {result && (
           <div className="import-result">

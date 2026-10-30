@@ -13,6 +13,7 @@ import ru.sviridov.wallet.parser.ParsedStatement;
 import ru.sviridov.wallet.parser.StatementParseException;
 import ru.sviridov.wallet.parser.StatementParser;
 import ru.sviridov.wallet.web.BadRequestException;
+import ru.sviridov.wallet.web.CardMismatchException;
 import ru.sviridov.wallet.web.NotFoundException;
 import ru.sviridov.wallet.web.dto.StatementImportResponse;
 
@@ -79,13 +80,12 @@ public class StatementService {
             validRows.add(row);
         }
 
-        // Card reconciliation (warning only, does not block the import).
+        // Card reconciliation — hard error: block the import on mismatch.
         if (card.getLast4() != null && !card.getLast4().isBlank()
                 && parsed.cardNumber() != null && !parsed.cardNumber().isBlank()) {
             String extractedLast4 = last4(parsed.cardNumber());
             if (!card.getLast4().equals(extractedLast4)) {
-                warnings.add("Номер карты в выписке (…" + extractedLast4
-                        + ") не совпадает с картой (…" + card.getLast4() + ")");
+                throw new CardMismatchException(extractedLast4, card.getLast4());
             }
         }
 

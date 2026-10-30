@@ -44,6 +44,12 @@ public class GlobalExceptionHandler {
                 .body(ApiError.of(400, "Bad Request", ex.getMessage(), request.getRequestURI()));
     }
 
+    @ExceptionHandler(CardMismatchException.class)
+    public ResponseEntity<ApiError> handleCardMismatch(CardMismatchException ex, HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiError.of(409, "Card Mismatch", ex.getMessage(), request.getRequestURI()));
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiError> handleGeneric(Exception ex, HttpServletRequest request) {
         log.error("Unhandled exception on {}", request.getRequestURI(), ex);

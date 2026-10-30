@@ -22,6 +22,8 @@ services:
       DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-sviridov_wallet}
       DB_USERNAME: ${POSTGRES_USER:-sviridov}
       DB_PASSWORD: ${POSTGRES_PASSWORD:-sviridov}
+      BOOTSTRAP_USERNAME: ${BOOTSTRAP_USERNAME:-}
+      BOOTSTRAP_PASSWORD: ${BOOTSTRAP_PASSWORD:-}
     ports:
       - "8080:8080"
     depends_on:

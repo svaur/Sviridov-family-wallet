@@ -1,17 +1,24 @@
-import { Routes, Route, Link } from 'react-router-dom'
-import HomePage from './pages/HomePage'
+import { Navigate, Route, Routes } from 'react-router-dom'
+import { AuthProvider } from './auth/AuthContext'
+import { RequireAuth } from './components/RequireAuth'
+import { CardsPage } from './pages/CardsPage'
+import { LoginPage } from './pages/LoginPage'
 
 export default function App() {
   return (
-    <div className="app">
-      <header className="app-header">
-        <Link to="/">Sviridov Family Wallet</Link>
-      </header>
-      <main className="app-main">
-        <Routes>
-          <Route path="/" element={<HomePage />} />
-        </Routes>
-      </main>
-    </div>
+    <AuthProvider>
+      <Routes>
+        <Route path="/login" element={<LoginPage />} />
+        <Route
+          path="/"
+          element={
+            <RequireAuth>
+              <CardsPage />
+            </RequireAuth>
+          }
+        />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </AuthProvider>
   )
 }

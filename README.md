@@ -3,7 +3,7 @@
 Self-hosted personal/family finance tracker built on PDF bank statements.
 
 **Stack:** Java 21 · Spring Boot 3 (web, data-jpa, validation, security, actuator) · Flyway · PostgreSQL ·
-React + TypeScript + Vite · React Router. PDFBox arrives in Stage 2.
+Apache PDFBox · React + TypeScript + Vite · React Router.
 
 ## Repository layout
 
@@ -46,22 +46,33 @@ docker-compose.yml  postgres + backend
   ```
 - Endpoints: `POST /api/auth/login`, `GET /api/auth/me`, `POST /api/auth/logout`.
 
-## API (Stage 1)
+## API
 
+Cards:
 - `GET /api/cards` — list my cards
 - `POST /api/cards` — create (`{ displayName, bank?, last4?, currency? }`)
 - `PUT /api/cards/{id}` — update
 - `DELETE /api/cards/{id}` — archive (soft)
+
+Statements (PDF upload, ≤10 MB):
+- `POST /api/cards/{cardId}/statements` — multipart `file`; parses, validates, dedups; returns
+  `{ statementId, status, rowCountRaw, importedCount, skippedDuplicates, warnings[], unrecognizedRows[] }`.
+  The PDF is **not** stored — only import metadata goes to the `statements` table.
+- `GET /api/cards/{cardId}/statements` — upload history for a card.
 
 All errors share one shape:
 `{ timestamp, status, error, message, path, fieldErrors[] }` (400 validation, 401, 403, 404, 500).
 
 ## Roadmap
 
-Stage 0 (done): skeleton + infra. Stage 1 (current): auth + full schema + cards CRUD.
-Stage 2: PDF parser + statement upload + dedup. Stage 3: normalization + categorization.
-Stage 4: dashboard + analytics. Stage 5: edit + learning. Stage 6: gaps + transfers + notifications.
-Stage 7: production readiness (nginx/TLS, JSON logs, OpenAPI, rate-limit).
+- Stage 0 (done): skeleton + infra.
+- Stage 1 (done): auth + full schema + cards CRUD.
+- Stage 2 (done): PDF parser (PDFBox) + statement upload + validation + dedup.
+- Stage 3 (next): merchant normalization + categorization (default + user rules, priority).
+- Stage 4: dashboard + analytics (`GET /api/analytics`).
+- Stage 5: transaction editing + learning.
+- Stage 6: gaps + transfers + notifications.
+- Stage 7: production readiness (nginx/TLS, JSON logs, OpenAPI, rate-limit).
 
 ## Notes
 

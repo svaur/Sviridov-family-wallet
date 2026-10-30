@@ -1,0 +1,21 @@
+# Java / Maven
+backend/target/
+*.class
+.mvn/wrapper/maven-wrapper.jar
+
+# Node
+frontend/node_modules/
+frontend/dist/
+.pnpm-store/
+node_modules/
+*.log
+npm-debug.log*
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.DS_Store
+
+# Env / secrets
+.env

@@ -3,6 +3,7 @@ import { AuthProvider } from './auth/AuthContext'
 import { RequireAuth } from './components/RequireAuth'
 import { CardsPage } from './pages/CardsPage'
 import { LoginPage } from './pages/LoginPage'
+import { StatementsPage } from './pages/StatementsPage'
 
 export default function App() {
   return (
@@ -14,6 +15,14 @@ export default function App() {
           element={
             <RequireAuth>
               <CardsPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/cards/:cardId/statements"
+          element={
+            <RequireAuth>
+              <StatementsPage />
             </RequireAuth>
           }
         />

@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react'
+import { Link } from 'react-router-dom'
 import { api, HttpError } from '../api'
 import { useAuth } from '../auth/AuthContext'
 
@@ -177,6 +178,9 @@ export function CardsPage() {
                   <td>{card.currency}</td>
                   <td>{card.archived ? 'архивирована' : 'активна'}</td>
                   <td className="row">
+                    <Link className="link-btn" to={`/cards/${card.id}/statements`}>
+                      Выписки
+                    </Link>
                     <button onClick={() => startEdit(card)}>Изменить</button>
                     {!card.archived && (
                       <button onClick={() => archiveCard(card)}>Архивировать</button>

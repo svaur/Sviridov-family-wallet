@@ -1,0 +1,275 @@
+package ru.sviridov.wallet.parser;
+
+import org.springframework.stereotype.Component;
+
+import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.text.PDFTextStripper;
+import org.apache.pdfbox.text.TextPosition;
+
+import java.io.IOException;
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+/**
+ * PDFBox implementation of {@link StatementParser} for the bank "Счет-выписка"
+ * format:
+ *
+ * <pre>
+ * За период с: 01.09.2026 по: 30.09.2026
+ * Карта: 2202XXXXXXXX1234
+ * Договор: 1234567890
+ * Счет: 40817810000000000000 (руб.)
+ * Номер | Дата операции | Операция | Расход | Приход | Назначение платежа
+ * </pre>
+ *
+ * Debit/credit is determined by the x-position of the amount token relative to
+ * the "Расход" and "Приход" column headers, mirroring the bank's layout.
+ */
+@Component
+public class PdfBoxStatementParser implements StatementParser {
+
+    private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("dd.MM.yyyy");
+    private static final Pattern P_PERIOD = Pattern.compile("За период с:\\s*(\\d{2}\\.\\d{2}\\.\\d{4})\\s*по:\\s*(\\d{2}\\.\\d{2}\\.\\d{4})");
+    private static final Pattern P_CARD = Pattern.compile("Карта:\\s*(\\S+)");
+    private static final Pattern P_CONTRACT = Pattern.compile("Договор:\\s*(\\S+)");
+    private static final Pattern P_ACCOUNT = Pattern.compile("Счет:\\s*(\\d+)");
+    private static final Pattern P_ROW_NUM = Pattern.compile("^\\d{1,4}$");
+    private static final Pattern P_DATE = Pattern.compile("^\\d{2}\\.\\d{2}\\.\\d{4}$");
+    private static final Pattern P_MONEY = Pattern.compile("^\\d+(?:[.,]\\d{2})$");
+    private static final float COLUMN_TOLERANCE = 60f;
+    private static final float LINE_TOLERANCE = 5f;
+
+    @Override
+    public String version() {
+        return "pdfbox-1.0";
+    }
+
+    @Override
+    public ParsedStatement parse(byte[] pdfBytes) throws StatementParseException {
+        try (PDDocument doc = Loader.loadPDF(pdfBytes)) {
+            String fullText = extractText(doc);
+
+            LocalDate periodFrom = parseDate(regexGroup(fullText, P_PERIOD, 1));
+            LocalDate periodTo = parseDate(regexGroup(fullText, P_PERIOD, 2));
+            String cardNumber = regexGroup(fullText, P_CARD, 1);
+            String contract = regexGroup(fullText, P_CONTRACT, 1);
+            String account = regexGroup(fullText, P_ACCOUNT, 1);
+
+            List<Token> tokens = extractTokens(doc);
+            Float expenseX = null;
+            Float incomeX = null;
+            for (Token t : tokens) {
+                if ("Расход".equals(t.text())) {
+                    expenseX = t.x();
+                } else if ("Приход".equals(t.text())) {
+                    incomeX = t.x();
+                }
+            }
+            if (expenseX == null || incomeX == null) {
+                throw new StatementParseException("Не найдены колонки «Расход»/«Приход» в таблице выписки");
+            }
+
+            List<ParsedRow> rows = new ArrayList<>();
+            List<String> unrecognized = new ArrayList<>();
+            int rowCountRaw = 0;
+            for (List<Token> line : groupByY(tokens)) {
+                if (line.isEmpty()) {
+                    continue;
+                }
+                line.sort(Comparator.comparingDouble(Token::x));
+                Token first = line.get(0);
+                if (!P_ROW_NUM.matcher(first.text()).matches()) {
+                    continue; // header, footer or signature line
+                }
+                rowCountRaw++;
+                ParsedRow row = parseRow(line, expenseX, incomeX);
+                if (row == null) {
+                    unrecognized.add("Строка " + first.text());
+                } else {
+                    rows.add(row);
+                }
+            }
+
+            return new ParsedStatement(periodFrom, periodTo, cardNumber, contract, account,
+                    rowCountRaw, rows, unrecognized);
+        } catch (IOException e) {
+            throw new StatementParseException("Не удалось прочитать PDF: " + e.getMessage(), e);
+        }
+    }
+
+    private static ParsedRow parseRow(List<Token> line, float expenseX, float incomeX) {
+        Token rowNumTok = line.get(0);
+        int rowNumber;
+        try {
+            rowNumber = Integer.parseInt(rowNumTok.text());
+        } catch (NumberFormatException e) {
+            return null;
+        }
+
+        Token dateTok = null;
+        for (Token t : line) {
+            if (P_DATE.matcher(t.text()).matches()) {
+                dateTok = t;
+                break;
+            }
+        }
+        if (dateTok == null) {
+            return null;
+        }
+        LocalDate date = parseDate(dateTok.text());
+        if (date == null) {
+            return null;
+        }
+
+        Token amountTok = null;
+        String column = null;
+        float bestDistance = Float.MAX_VALUE;
+        for (Token t : line) {
+            if (!P_MONEY.matcher(t.text()).matches()) {
+                continue;
+            }
+            float dExp = Math.abs(t.x() - expenseX);
+            float dInc = Math.abs(t.x() - incomeX);
+            float distance = Math.min(dExp, dInc);
+            if (distance > COLUMN_TOLERANCE) {
+                continue;
+            }
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                amountTok = t;
+                column = dExp <= dInc ? "debit" : "credit";
+            }
+        }
+        if (amountTok == null) {
+            return null;
+        }
+
+        BigDecimal amount = new BigDecimal(amountTok.text().replace(',', '.'));
+        BigDecimal expense = "debit".equals(column) ? amount : null;
+        BigDecimal income = "credit".equals(column) ? amount : null;
+
+        StringBuilder operation = new StringBuilder();
+        StringBuilder purpose = new StringBuilder();
+        for (Token t : line) {
+            if (t == rowNumTok || t == dateTok || t == amountTok) {
+                continue;
+            }
+            if (t.x() < amountTok.x() - 5f) {
+                if (operation.length() > 0) {
+                    operation.append(' ');
+                }
+                operation.append(t.text());
+            } else if (t.x() > amountTok.x() + 5f) {
+                if (purpose.length() > 0) {
+                    purpose.append(' ');
+                }
+                purpose.append(t.text());
+            }
+        }
+
+        return new ParsedRow(rowNumber, date, operation.toString(), expense, income, purpose.toString());
+    }
+
+    private static String extractText(PDDocument doc) throws IOException {
+        PDFTextStripper stripper = new PDFTextStripper();
+        stripper.setSortByPosition(true);
+        return stripper.getText(doc);
+    }
+
+    private static List<Token> extractTokens(PDDocument doc) throws IOException {
+        TokenCollector collector = new TokenCollector();
+        collector.setSortByPosition(true);
+        collector.getText(doc);
+        return collector.tokens;
+    }
+
+    private static List<List<Token>> groupByY(List<Token> tokens) {
+        List<Token> sorted = new ArrayList<>(tokens);
+        sorted.sort(Comparator.comparingDouble(Token::y).thenComparingDouble(Token::x));
+        List<List<Token>> lines = new ArrayList<>();
+        List<Token> current = new ArrayList<>();
+        float currentY = 0f;
+        for (Token t : sorted) {
+            if (current.isEmpty() || Math.abs(t.y() - currentY) <= LINE_TOLERANCE) {
+                if (current.isEmpty()) {
+                    currentY = t.y();
+                }
+                current.add(t);
+            } else {
+                lines.add(current);
+                current = new ArrayList<>();
+                current.add(t);
+                currentY = t.y();
+            }
+        }
+        if (!current.isEmpty()) {
+            lines.add(current);
+        }
+        return lines;
+    }
+
+    private static String regexGroup(String text, Pattern pattern, int group) {
+        if (text == null) {
+            return null;
+        }
+        Matcher m = pattern.matcher(text);
+        return m.find() ? m.group(group) : null;
+    }
+
+    private static LocalDate parseDate(String s) {
+        if (s == null) {
+            return null;
+        }
+        try {
+            return LocalDate.parse(s, DATE_FMT);
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    private record Token(String text, float x, float y) {
+    }
+
+    private static final class TokenCollector extends PDFTextStripper {
+        final List<Token> tokens = new ArrayList<>();
+
+        @Override
+        protected void writeString(String text, List<TextPosition> textPositions) throws IOException {
+            if (textPositions == null || textPositions.isEmpty()) {
+                super.writeString(text, textPositions);
+                return;
+            }
+            float y = textPositions.get(0).getYDirAdj();
+            int n = Math.min(text.length(), textPositions.size());
+            StringBuilder sb = new StringBuilder();
+            Float x = null;
+            for (int i = 0; i < n; i++) {
+                char c = text.charAt(i);
+                TextPosition tp = textPositions.get(i);
+                if (Character.isWhitespace(c)) {
+                    if (sb.length() > 0 && x != null) {
+                        tokens.add(new Token(sb.toString(), x, y));
+                    }
+                    sb.setLength(0);
+                    x = null;
+                } else {
+                    if (x == null) {
+                        x = tp.getXDirAdj();
+                    }
+                    sb.append(c);
+                }
+            }
+            if (sb.length() > 0 && x != null) {
+                tokens.add(new Token(sb.toString(), x, y));
+            }
+            super.writeString(text, textPositions);
+        }
+    }
+}

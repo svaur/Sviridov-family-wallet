@@ -3,6 +3,7 @@ import { AuthProvider } from './auth/AuthContext'
 import { RequireAuth } from './components/RequireAuth'
 import { CardsPage } from './pages/CardsPage'
 import { DashboardPage } from './pages/DashboardPage'
+import { ImportPage } from './pages/ImportPage'
 import { LoginPage } from './pages/LoginPage'
 import { RulesPage } from './pages/RulesPage'
 import { StatementsPage } from './pages/StatementsPage'
@@ -35,6 +36,14 @@ export default function App() {
           element={
             <RequireAuth>
               <StatementsPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/cards/:cardId/import"
+          element={
+            <RequireAuth>
+              <ImportPage />
             </RequireAuth>
           }
         />

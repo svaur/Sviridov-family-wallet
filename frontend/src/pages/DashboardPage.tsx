@@ -30,7 +30,15 @@ interface Analytics {
   categories: CategoryPoint[]
 }
 
+interface Category {
+  id: number
+  name: string
+}
+
 const PIE_COLORS = ['#2563eb', '#16a34a', '#dc2626', '#d97706', '#7c3aed', '#0891b2', '#db2777', '#65a30d']
+
+/** Sentinel id used by the analytics API for the "uncategorized" bucket. */
+const UNCATEGORIZED = 0
 
 function iso(d: Date): string {
   const m = String(d.getMonth() + 1).padStart(2, '0')
@@ -54,14 +62,17 @@ export function DashboardPage() {
   const [from, setFrom] = useState(defaultRange().from)
   const [to, setTo] = useState(defaultRange().to)
   const [data, setData] = useState<Analytics | null>(null)
+  const [categories, setCategories] = useState<Category[]>([])
+  const [excluded, setExcluded] = useState<Set<number>>(new Set())
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  async function load(f: string, t: string) {
+  async function load(f: string, t: string, ex: Set<number>) {
     setLoading(true)
     setError(null)
+    const q = ex.size > 0 ? `&exclude=${Array.from(ex).join(',')}` : ''
     try {
-      setData(await api.get<Analytics>(`/api/analytics?from=${f}&to=${t}`))
+      setData(await api.get<Analytics>(`/api/analytics?from=${f}&to=${t}${q}`))
     } catch (e) {
       setError(e instanceof HttpError ? e.message : 'Не удалось загрузить аналитику')
     } finally {
@@ -69,11 +80,31 @@ export function DashboardPage() {
     }
   }
 
+  async function loadCategories() {
+    try {
+      setCategories(await api.get<Category[]>('/api/categories'))
+    } catch {
+      // Non-fatal: the filter simply stays empty.
+    }
+  }
+
   useEffect(() => {
     const r = defaultRange()
-    load(r.from, r.to)
+    load(r.from, r.to, new Set())
+    loadCategories()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  function toggleCategory(id: number) {
+    const next = new Set(excluded)
+    if (next.has(id)) {
+      next.delete(id)
+    } else {
+      next.add(id)
+    }
+    setExcluded(next)
+    load(from, to, next)
+  }
 
   const monthly = (data?.monthly ?? []).map((p) => ({
     month: monthLabel(p.month),
@@ -81,7 +112,7 @@ export function DashboardPage() {
     Расход: p.expense,
   }))
 
-  const categories = (data?.categories ?? []).map((c) => ({
+  const categoriesData = (data?.categories ?? []).map((c) => ({
     name: c.categoryName,
     value: c.amount,
   }))
@@ -108,8 +139,33 @@ export function DashboardPage() {
           <span>По</span>
           <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
         </label>
-        <button onClick={() => load(from, to)}>Показать</button>
+        <button onClick={() => load(from, to, excluded)}>Показать</button>
       </div>
+
+      <section className="card">
+        <h2>Категории на дашборде</h2>
+        <div className="category-filter">
+          <label className="checkbox">
+            <input
+              type="checkbox"
+              checked={!excluded.has(UNCATEGORIZED)}
+              onChange={() => toggleCategory(UNCATEGORIZED)}
+            />
+            <span>Без категории</span>
+          </label>
+          {categories.map((c) => (
+            <label key={c.id} className="checkbox">
+              <input
+                type="checkbox"
+                checked={!excluded.has(c.id)}
+                onChange={() => toggleCategory(c.id)}
+              />
+              <span>{c.name}</span>
+            </label>
+          ))}
+          {categories.length === 0 && <span className="muted">Категорий пока нет</span>}
+        </div>
+      </section>
 
       {error && <div className="error">{error}</div>}
 
@@ -152,13 +208,13 @@ export function DashboardPage() {
 
             <section className="card">
               <h2>Расходы по категориям</h2>
-              {categories.length === 0 ? (
+              {categoriesData.length === 0 ? (
                 <p className="muted">Нет расходов за период</p>
               ) : (
                 <ResponsiveContainer width="100%" height={300}>
                   <PieChart>
-                    <Pie data={categories} dataKey="value" nameKey="name" outerRadius={100}>
-                      {categories.map((_, i) => (
+                    <Pie data={categoriesData} dataKey="value" nameKey="name" outerRadius={100}>
+                      {categoriesData.map((_, i) => (
                         <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
                       ))}
                     </Pie>

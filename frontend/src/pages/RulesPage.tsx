@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { api, HttpError } from '../api'
 import { useAuth } from '../auth/AuthContext'
+import { buildRuleParams } from '../ruleHelpers'
 
 interface Category {
   id: number
@@ -24,15 +25,11 @@ interface RulePrefill {
   categoryId: number | null
 }
 
-function isRegex(value: string): boolean {
-  return /[\\^$*+?()[\]{}|]/.test(value)
-}
-
 function paramsLabel(rule: Rule) {
   const p = rule.params ?? {}
   const parts: string[] = []
-  if (p.merchant_contains != null) parts.push(`назначение платежа содержит «${p.merchant_contains}»`)
-  if (p.merchant_regex != null) parts.push(`назначение платежа (regex) «${p.merchant_regex}»`)
+  if (p.purpose_contains != null) parts.push(`назначение платежа содержит «${p.purpose_contains}»`)
+  if (p.purpose_regex != null) parts.push(`назначение платежа (regex) «${p.purpose_regex}»`)
   if (p.operation_contains != null) parts.push(`операция содержит «${p.operation_contains}»`)
   if (p.operation_regex != null) parts.push(`операция (regex) «${p.operation_regex}»`)
   if (p.min != null || p.max != null) parts.push(`сумма ${p.min ?? '—'}…${p.max ?? '—'}`)
@@ -208,10 +205,10 @@ export function RulesPage() {
       categoryId: String(r.categoryId),
       priority: String(r.priority),
       purpose:
-        p.merchant_regex != null
-          ? String(p.merchant_regex)
-          : p.merchant_contains != null
-            ? String(p.merchant_contains)
+        p.purpose_regex != null
+          ? String(p.purpose_regex)
+          : p.purpose_contains != null
+            ? String(p.purpose_contains)
             : '',
       operation:
         p.operation_regex != null
@@ -234,38 +231,13 @@ export function RulesPage() {
     setRuleFormError(null)
   }
 
-  function buildParams(f: RuleForm): Record<string, string | number> {
-    const params: Record<string, string | number> = {}
-    const purpose = f.purpose.trim()
-    if (purpose !== '') {
-      if (isRegex(purpose)) {
-        params.merchant_regex = purpose
-      } else {
-        params.merchant_contains = purpose
-      }
-    }
-    const operation = f.operation.trim()
-    if (operation !== '') {
-      if (isRegex(operation)) {
-        params.operation_regex = operation
-      } else {
-        params.operation_contains = operation
-      }
-    }
-    if (f.min !== '') params.min = Number(f.min)
-    if (f.max !== '') params.max = Number(f.max)
-    if (f.dayFrom !== '') params.day_from = Number(f.dayFrom)
-    if (f.dayTo !== '') params.day_to = Number(f.dayTo)
-    return params
-  }
-
   async function saveRule(e: FormEvent) {
     e.preventDefault()
     setRuleFormError(null)
     try {
       const payload = {
         name: ruleForm.name.trim() === '' ? null : ruleForm.name.trim(),
-        params: buildParams(ruleForm),
+        params: buildRuleParams(ruleForm),
         categoryId: Number(ruleForm.categoryId),
         priority: ruleForm.priority === '' ? null : Number(ruleForm.priority),
       }
@@ -440,7 +412,7 @@ export function RulesPage() {
               <input
                 value={ruleForm.purpose}
                 onChange={(e) => setRuleForm({ ...ruleForm, purpose: e.target.value })}
-                placeholder="например: korma или ^korma"
+                placeholder="например: оплата аренды или ^оплата"
               />
             </label>
             <label className="field">

@@ -1,7 +1,8 @@
 import { Fragment, useEffect, useState, type FormEvent } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { api, HttpError } from '../api'
 import { useAuth } from '../auth/AuthContext'
+import { RuleQuickForm, type RulePrefill } from '../components/RuleQuickForm'
 import { fmtDate, fmtMoney } from '../format'
 
 interface Transaction {
@@ -9,7 +10,6 @@ interface Transaction {
   date: string
   operation: string | null
   purpose: string | null
-  merchantNormalized: string | null
   amount: number | string
   type: string
   categoryId: number | null
@@ -49,7 +49,6 @@ const emptyTx: TxForm = {
 
 export function TransactionsPage() {
   const { user, logout } = useAuth()
-  const navigate = useNavigate()
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [categories, setCategories] = useState<Category[]>([])
   const [cards, setCards] = useState<Card[]>([])
@@ -61,6 +60,7 @@ export function TransactionsPage() {
 
   const [expandedId, setExpandedId] = useState<number | null>(null)
   const [assignCat, setAssignCat] = useState('')
+  const [rulePrefill, setRulePrefill] = useState<RulePrefill | null>(null)
 
   async function load() {
     setLoading(true)
@@ -144,6 +144,7 @@ export function TransactionsPage() {
       setExpandedId(id)
     }
     setAssignCat('')
+    setRulePrefill(null)
   }
 
   async function deleteTx(t: Transaction) {
@@ -158,14 +159,10 @@ export function TransactionsPage() {
   }
 
   function createRuleFrom(t: Transaction) {
-    navigate('/rules', {
-      state: {
-        rulePrefill: {
-          purpose: t.merchantNormalized ?? t.purpose ?? null,
-          operation: t.operation ?? null,
-          categoryId: t.categoryId,
-        },
-      },
+    setRulePrefill({
+      purpose: t.purpose ?? null,
+      operation: t.operation ?? null,
+      categoryId: t.categoryId,
     })
   }
 
@@ -299,9 +296,23 @@ export function TransactionsPage() {
                             <button onClick={() => assignCategory(t.id)} disabled={assignCat === ''}>
                               Назначить категорию
                             </button>
-                            <button onClick={() => createRuleFrom(t)}>Создать правило</button>
+                            <button onClick={() => (rulePrefill ? setRulePrefill(null) : createRuleFrom(t))}>
+                              {rulePrefill ? 'Скрыть форму' : 'Создать правило'}
+                            </button>
                             <button onClick={() => deleteTx(t)}>Удалить</button>
                           </div>
+                          {rulePrefill && (
+                            <RuleQuickForm
+                              categories={categories}
+                              prefill={rulePrefill}
+                              onClose={() => setRulePrefill(null)}
+                              onCreated={() => {
+                                setRulePrefill(null)
+                                setExpandedId(null)
+                                load()
+                              }}
+                            />
+                          )}
                         </td>
                       </tr>
                     )}

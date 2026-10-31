@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api, HttpError } from '../api'
 import { useAuth } from '../auth/AuthContext'
@@ -28,16 +28,6 @@ interface Statement {
   account: string | null
 }
 
-interface ImportResult {
-  statementId: number
-  status: string
-  rowCountRaw: number
-  importedCount: number
-  skippedDuplicates: number
-  warnings: string[]
-  unrecognizedRows: string[]
-}
-
 export function StatementsPage() {
   const { cardId } = useParams()
   const { user, logout } = useAuth()
@@ -45,9 +35,6 @@ export function StatementsPage() {
   const [statements, setStatements] = useState<Statement[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [uploading, setUploading] = useState(false)
-  const [result, setResult] = useState<ImportResult | null>(null)
-  const [mismatch, setMismatch] = useState<string | null>(null)
 
   const id = Number(cardId)
 
@@ -68,33 +55,6 @@ export function StatementsPage() {
     load()
   }, [id])
 
-  async function onUpload(e: FormEvent) {
-    e.preventDefault()
-    const input = e.currentTarget.querySelector('input[type="file"]') as HTMLInputElement
-    const file = input.files?.[0]
-    if (!file) {
-      setError('Выберите файл')
-      return
-    }
-    setUploading(true)
-    setError(null)
-    setResult(null)
-    setMismatch(null)
-    try {
-      setResult(await api.upload<ImportResult>(`/api/cards/${id}/statements`, file))
-      input.value = ''
-      await load()
-    } catch (err) {
-      if (err instanceof HttpError && err.status === 409) {
-        setMismatch(err.message)
-      } else {
-        setError(err instanceof HttpError ? err.message : 'Не удалось загрузить выписку')
-      }
-    } finally {
-      setUploading(false)
-    }
-  }
-
   return (
     <div className="page">
       <header className="topbar">
@@ -111,51 +71,11 @@ export function StatementsPage() {
       {error && <div className="error">{error}</div>}
 
       <section className="card">
-        <h2>Загрузить выписку (PDF, до 10 МБ)</h2>
-        <form onSubmit={onUpload}>
-          <div className="row">
-            <input type="file" accept="application/pdf" />
-            <button type="submit" disabled={uploading}>
-              {uploading ? 'Загрузка…' : 'Загрузить'}
-            </button>
-          </div>
-        </form>
-
-        {mismatch && (
-          <div className="warning">
-            <p>{mismatch}</p>
-            <Link className="link-btn" to="/cards">
-              Создать карту
-            </Link>
-          </div>
-        )}
-
-        {result && (
-          <div className="import-result">
-            <p>
-              Статус: <strong>{result.status}</strong> · распознано строк {result.rowCountRaw} ·
-              импортировано {result.importedCount} · пропущено дубликатов {result.skippedDuplicates}
-            </p>
-            {result.warnings.length > 0 && (
-              <ul>
-                {result.warnings.map((w, i) => (
-                  <li key={i} className="warning">
-                    {w}
-                  </li>
-                ))}
-              </ul>
-            )}
-            {result.unrecognizedRows.length > 0 && (
-              <ul>
-                {result.unrecognizedRows.map((r, i) => (
-                  <li key={i} className="error">
-                    {r}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        )}
+        <h2>Загрузить выписку</h2>
+        <p className="muted">PDF до 10 МБ. Загрузка проходит в три шага: файл → проверка категоризации → подтверждение.</p>
+        <Link className="link-btn" to={`/cards/${id}/import`}>
+          Загрузить выписку
+        </Link>
       </section>
 
       <section>

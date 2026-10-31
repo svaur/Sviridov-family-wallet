@@ -11,17 +11,22 @@ interface Category {
 
 interface Rule {
   id: number
+  name: string | null
   params: Record<string, string | number>
   categoryId: number
   priority: number
   autoLearned: boolean
 }
 
+function isRegex(value: string): boolean {
+  return /[\\^$*+?()[\]{}|]/.test(value)
+}
+
 function paramsLabel(rule: Rule) {
   const p = rule.params ?? {}
   const parts: string[] = []
-  if (p.merchant_contains != null) parts.push(`содержит «${p.merchant_contains}»`)
-  if (p.merchant_regex != null) parts.push(`regex «${p.merchant_regex}»`)
+  if (p.merchant_contains != null) parts.push(`назначение платежа содержит «${p.merchant_contains}»`)
+  if (p.merchant_regex != null) parts.push(`назначение платежа (regex) «${p.merchant_regex}»`)
   if (p.min != null || p.max != null) parts.push(`сумма ${p.min ?? '—'}…${p.max ?? '—'}`)
   if (p.day_from != null || p.day_to != null) {
     parts.push(p.day_from === p.day_to ? `день ${p.day_from}` : `день ${p.day_from ?? '—'}…${p.day_to ?? '—'}`)
@@ -35,10 +40,10 @@ interface CategoryForm {
 }
 
 interface RuleForm {
+  name: string
   categoryId: string
   priority: string
-  merchantContains: string
-  merchantRegex: string
+  purpose: string
   min: string
   max: string
   dayFrom: string
@@ -48,10 +53,10 @@ interface RuleForm {
 const emptyCategory: CategoryForm = { name: '', parentId: '0' }
 
 const emptyRule: RuleForm = {
+  name: '',
   categoryId: '',
   priority: '100',
-  merchantContains: '',
-  merchantRegex: '',
+  purpose: '',
   min: '',
   max: '',
   dayFrom: '',
@@ -155,10 +160,15 @@ export function RulesPage() {
     setRuleEditingId(r.id)
     const p = r.params ?? {}
     setRuleForm({
+      name: r.name ?? '',
       categoryId: String(r.categoryId),
       priority: String(r.priority),
-      merchantContains: p.merchant_contains != null ? String(p.merchant_contains) : '',
-      merchantRegex: p.merchant_regex != null ? String(p.merchant_regex) : '',
+      purpose:
+        p.merchant_regex != null
+          ? String(p.merchant_regex)
+          : p.merchant_contains != null
+            ? String(p.merchant_contains)
+            : '',
       min: p.min != null ? String(p.min) : '',
       max: p.max != null ? String(p.max) : '',
       dayFrom: p.day_from != null ? String(p.day_from) : '',
@@ -169,8 +179,14 @@ export function RulesPage() {
 
   function buildParams(f: RuleForm): Record<string, string | number> {
     const params: Record<string, string | number> = {}
-    if (f.merchantContains.trim() !== '') params.merchant_contains = f.merchantContains.trim()
-    if (f.merchantRegex.trim() !== '') params.merchant_regex = f.merchantRegex.trim()
+    const purpose = f.purpose.trim()
+    if (purpose !== '') {
+      if (isRegex(purpose)) {
+        params.merchant_regex = purpose
+      } else {
+        params.merchant_contains = purpose
+      }
+    }
     if (f.min !== '') params.min = Number(f.min)
     if (f.max !== '') params.max = Number(f.max)
     if (f.dayFrom !== '') params.day_from = Number(f.dayFrom)
@@ -183,6 +199,7 @@ export function RulesPage() {
     setRuleFormError(null)
     try {
       const payload = {
+        name: ruleForm.name.trim() === '' ? null : ruleForm.name.trim(),
         params: buildParams(ruleForm),
         categoryId: Number(ruleForm.categoryId),
         priority: ruleForm.priority === '' ? null : Number(ruleForm.priority),
@@ -294,6 +311,14 @@ export function RulesPage() {
         <p className="muted">Правило срабатывает, если совпадают все заполненные условия. Пустые поля игнорируются.</p>
         <form className="form-grid" onSubmit={saveRule}>
           <label className="field">
+            <span>Имя правила</span>
+            <input
+              value={ruleForm.name}
+              onChange={(e) => setRuleForm({ ...ruleForm, name: e.target.value })}
+              placeholder="например: Продукты — Магнит"
+            />
+          </label>
+          <label className="field">
             <span>Категория</span>
             <select
               value={ruleForm.categoryId}
@@ -317,19 +342,11 @@ export function RulesPage() {
             />
           </label>
           <label className="field">
-            <span>Мерчант содержит</span>
+            <span>Назначение платежа (включая регулярные выражения)</span>
             <input
-              value={ruleForm.merchantContains}
-              onChange={(e) => setRuleForm({ ...ruleForm, merchantContains: e.target.value })}
-              placeholder="например: korma"
-            />
-          </label>
-          <label className="field">
-            <span>Мерчант (регулярное выражение)</span>
-            <input
-              value={ruleForm.merchantRegex}
-              onChange={(e) => setRuleForm({ ...ruleForm, merchantRegex: e.target.value })}
-              placeholder="например: ^korma"
+              value={ruleForm.purpose}
+              onChange={(e) => setRuleForm({ ...ruleForm, purpose: e.target.value })}
+              placeholder="например: korma или ^korma"
             />
           </label>
           <label className="field">
@@ -387,6 +404,7 @@ export function RulesPage() {
         <table className="table">
           <thead>
             <tr>
+              <th>Имя</th>
               <th>Условие</th>
               <th>Категория</th>
               <th>Приоритет</th>
@@ -396,6 +414,7 @@ export function RulesPage() {
           <tbody>
             {rules.map((r) => (
               <tr key={r.id}>
+                <td>{r.name ?? '—'}</td>
                 <td>{paramsLabel(r)}</td>
                 <td>{categoryName(r.categoryId)}</td>
                 <td>{r.priority}</td>
@@ -407,7 +426,7 @@ export function RulesPage() {
             ))}
             {rules.length === 0 && (
               <tr>
-                <td colSpan={4}>Правил нет</td>
+                <td colSpan={5}>Правил нет</td>
               </tr>
             )}
           </tbody>

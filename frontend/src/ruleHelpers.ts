@@ -54,13 +54,22 @@ function regexFind(pattern: string, haystack: string): boolean {
 export interface RuleTemplate {
   purpose: string | null
   operation: string | null
+  amount: number | null
+  date: string | null
+}
+
+/** Day of month from an ISO date ("YYYY-MM-DD" → 16), or null when absent. */
+export function dayOfMonth(date: string | null): number | null {
+  if (!date) return null
+  const parts = date.split('-')
+  return parts.length === 3 ? Number(parts[2]) : null
 }
 
 /**
  * Checks whether the given rule params would match the template transaction.
- * Mirrors the backend CategorizationEngine for the purpose/operation conditions
- * (the quick rule form only produces those two condition types). Returns false
- * when params carry no conditions.
+ * Mirrors the backend CategorizationEngine for every condition type the quick
+ * form produces (purpose/operation contains+regex, amount range, day of month).
+ * Returns false when params carry no conditions.
  */
 export function ruleMatchesTemplate(params: Record<string, string | number>, template: RuleTemplate): boolean {
   let hasCondition = false
@@ -84,6 +93,20 @@ export function ruleMatchesTemplate(params: Record<string, string | number>, tem
     hasCondition = true
     const hay = template.operation ?? ''
     if (hay === '' || !regexFind(String(params.operation_regex), hay)) return false
+  }
+  if (params.min != null || params.max != null) {
+    hasCondition = true
+    const amount = template.amount
+    if (amount == null) return false
+    if (params.min != null && amount < Number(params.min)) return false
+    if (params.max != null && amount > Number(params.max)) return false
+  }
+  if (params.day_from != null || params.day_to != null) {
+    hasCondition = true
+    const day = dayOfMonth(template.date)
+    if (day == null) return false
+    if (params.day_from != null && day < Number(params.day_from)) return false
+    if (params.day_to != null && day > Number(params.day_to)) return false
   }
 
   return hasCondition

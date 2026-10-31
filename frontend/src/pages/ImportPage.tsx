@@ -1,12 +1,14 @@
 import { Fragment, useEffect, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { api, HttpError } from '../api'
+import { CategoryPicker } from '../components/CategoryPicker'
 import { RuleQuickForm, type RulePrefill } from '../components/RuleQuickForm'
 import { fmtDate, fmtMoney } from '../format'
 
 interface Category {
   id: number
   name: string
+  icon: string
 }
 
 interface PreviewTx {
@@ -45,6 +47,18 @@ interface ImportResult {
   unrecognizedRows: string[]
 }
 
+function last4(cardNumber: string | null): string | null {
+  if (!cardNumber) return null
+  const digits = cardNumber.replace(/\D/g, '')
+  return digits.length >= 4 ? digits.slice(-4) : digits
+}
+
+function accountShort(account: string | null): string | null {
+  if (!account) return null
+  if (account.length <= 12) return account
+  return `${account.slice(0, 8)}…${account.slice(-4)}`
+}
+
 export function ImportPage() {
   const [step, setStep] = useState(1)
   const [file, setFile] = useState<File | null>(null)
@@ -55,7 +69,6 @@ export function ImportPage() {
 
   const [categories, setCategories] = useState<Category[]>([])
   const [expandedRow, setExpandedRow] = useState<number | null>(null)
-  const [assignCat, setAssignCat] = useState('')
   const [rulePrefill, setRulePrefill] = useState<RulePrefill | null>(null)
 
   useEffect(() => {
@@ -116,21 +129,19 @@ export function ImportPage() {
     } else {
       setExpandedRow(rowNumber)
     }
-    setAssignCat('')
     setRulePrefill(null)
   }
 
-  async function assignCategory(tx: PreviewTx) {
-    if (!preview || assignCat === '') return
+  async function assignCategory(tx: PreviewTx, categoryId: number) {
+    if (!preview) return
     setError(null)
     try {
       setPreview(
         await api.post<Preview>(
           `/api/statements/preview/${preview.draftId}/transactions/${tx.rowNumber}/category`,
-          { categoryId: Number(assignCat) },
+          { categoryId },
         ),
       )
-      setAssignCat('')
     } catch (err) {
       setError(err instanceof HttpError ? err.message : 'Не удалось назначить категорию')
     }
@@ -155,28 +166,44 @@ export function ImportPage() {
       purpose: tx.purpose ?? null,
       operation: tx.operation ?? null,
       categoryId: tx.categoryId,
+      amount: tx.amount,
+      date: tx.date,
     })
   }
+
+  const iconById = new Map(categories.map((c) => [c.id, c.icon]))
+  const uncategorizedCount = preview ? preview.transactions.filter((t) => t.categoryId == null).length : 0
 
   return (
     <div className="page">
       <h1>Загрузка выписки</h1>
 
       <div className="stepper">
-        <span className={step >= 1 ? 'step active' : 'step'}>1. Выбрать файл</span>
-        <span className={step >= 2 ? 'step active' : 'step'}>2. Проверка правил</span>
-        <span className={step >= 3 ? 'step active' : 'step'}>3. Подтверждение</span>
+        <span className={`step ${step > 1 ? 'done' : step === 1 ? 'active' : ''}`}>
+          <span className="n">{step > 1 ? '✓' : '1'}</span>Файл
+        </span>
+        <span className="line" />
+        <span className={`step ${step > 2 ? 'done' : step === 2 ? 'active' : ''}`}>
+          <span className="n">{step > 2 ? '✓' : '2'}</span>Проверка правил
+        </span>
+        <span className="line" />
+        <span className={`step ${step === 4 ? 'done' : step === 3 ? 'active' : ''}`}>
+          <span className="n">{step === 4 ? '✓' : '3'}</span>Подтверждение
+        </span>
       </div>
 
       {error && <div className="error">{error}</div>}
 
       {step === 1 && (
         <section className="card">
-          <h2>Шаг 1. Выберите файл</h2>
+          <h2>Выберите файл</h2>
+          <p className="muted">
+            PDF-выписка банка, до 10 МБ. Карта создаётся автоматически по номеру из выписки, сам файл не хранится.
+          </p>
           <form onSubmit={onChooseFile}>
             <div className="row">
               <input type="file" accept="application/pdf" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
-              <button type="submit" disabled={loading}>
+              <button type="submit" disabled={loading || !file}>
                 {loading ? 'Разбор…' : 'Загрузить'}
               </button>
             </div>
@@ -187,16 +214,32 @@ export function ImportPage() {
       {step === 2 && preview && (
         <>
           <section className="card">
-            <h2>Шаг 2. Проверка применения правил</h2>
-            <div className="row">
-              <span className="muted">
-                Период: {fmtDate(preview.periodFrom)} — {fmtDate(preview.periodTo)}
-              </span>
-              <span className="muted">
-                Распознано: {preview.validCount} / {preview.rowCountRaw}
-              </span>
-              <span className="muted">Дубликатов: {preview.skippedDuplicates}</span>
+            <div className="meta">
+              <div className="m">
+                <span>Карта</span>
+                <b>{last4(preview.cardNumber) ? `•••• ${last4(preview.cardNumber)}` : '—'}</b>
+              </div>
+              <div className="m">
+                <span>Период</span>
+                <b>
+                  {fmtDate(preview.periodFrom)} — {fmtDate(preview.periodTo)}
+                </b>
+              </div>
+              <div className="m">
+                <span>Счёт</span>
+                <b>{accountShort(preview.account) ?? '—'}</b>
+              </div>
+              <div className="m">
+                <span>Распознано</span>
+                <b>{preview.validCount} строк</b>
+              </div>
             </div>
+
+            {uncategorizedCount > 0 && (
+              <div className="warning">
+                ⚠ {uncategorizedCount} операций без категории — можно назначить вручную или создать правило.
+              </div>
+            )}
             {preview.warnings.length > 0 && (
               <ul>
                 {preview.warnings.map((w, i) => (
@@ -206,75 +249,76 @@ export function ImportPage() {
                 ))}
               </ul>
             )}
-            <div className="row">
-              <button onClick={onRecategorize} disabled={loading}>
-                Применить правила
-              </button>
-              <Link className="link-btn" to="/rules" target="_blank" rel="noreferrer">
-                Создать / изменить правила
-              </Link>
-            </div>
-          </section>
 
-          <section>
+            <h2>Предпросмотр операций</h2>
             <p className="muted">
-              Нажмите на операцию, чтобы назначить категорию вручную, создать правило по примеру или удалить её из
-              выгрузки.
+              Нажмите на операцию, чтобы назначить категорию, создать правило по примеру или удалить её из выгрузки.
             </p>
+
             <table className="table">
               <thead>
                 <tr>
-                  <th>№</th>
                   <th>Дата</th>
                   <th>Операция</th>
-                  <th>Назначение платежа</th>
                   <th>Категория</th>
-                  <th>Сумма</th>
+                  <th className="amount">Сумма</th>
                 </tr>
               </thead>
               <tbody>
                 {preview.transactions.map((tx) => (
                   <Fragment key={tx.rowNumber}>
-                    <tr className="tx-row" onClick={() => toggleRow(tx.rowNumber)}>
-                      <td>{tx.rowNumber}</td>
+                    <tr
+                      className={expandedRow === tx.rowNumber ? 'tx-row open' : 'tx-row'}
+                      onClick={() => toggleRow(tx.rowNumber)}
+                    >
                       <td>{fmtDate(tx.date)}</td>
-                      <td>{tx.operation ?? '—'}</td>
-                      <td>{tx.purpose ?? '—'}</td>
-                      <td className={tx.categoryName ? undefined : 'uncategorized'}>
-                        {tx.categoryName ?? 'Без категории'}
+                      <td>
+                        <div>{tx.operation ?? '—'}</div>
+                        {tx.purpose && (
+                          <div className="muted tx-purpose" title={tx.purpose}>
+                            {tx.purpose}
+                          </div>
+                        )}
                       </td>
-                      <td className={tx.type === 'debit' ? 'amount-debit' : 'amount-credit'}>
+                      <td>
+                        {tx.categoryName ? (
+                          <span className="pill">
+                            {iconById.get(tx.categoryId ?? -1) ?? ''} {tx.categoryName}
+                          </span>
+                        ) : (
+                          <span className="uncategorized">Без категории</span>
+                        )}
+                      </td>
+                      <td className={`amount ${tx.type === 'debit' ? 'amount-debit' : 'amount-credit'}`}>
                         {tx.type === 'debit' ? '− ' : '+ '}
                         {fmtMoney(tx.amount)}
                       </td>
                     </tr>
                     {expandedRow === tx.rowNumber && (
                       <tr>
-                        <td colSpan={6}>
+                        <td colSpan={4}>
                           <div className="tx-actions">
-                            <select
-                              value={assignCat}
-                              onChange={(e) => setAssignCat(e.target.value)}
-                              aria-label="Категория вручную"
+                            <CategoryPicker
+                              categories={categories}
+                              onAssign={(cid) => assignCategory(tx, cid)}
+                              onCategoriesChanged={setCategories}
+                            />
+                            <button
+                              className="btn-secondary btn-sm"
+                              onClick={() => (rulePrefill ? setRulePrefill(null) : createRuleFrom(tx))}
                             >
-                              <option value="">— категория —</option>
-                              {categories.map((c) => (
-                                <option key={c.id} value={c.id}>{c.name}</option>
-                              ))}
-                            </select>
-                            <button onClick={() => assignCategory(tx)} disabled={assignCat === ''}>
-                              Назначить категорию
-                            </button>
-                            <button onClick={() => (rulePrefill ? setRulePrefill(null) : createRuleFrom(tx))}>
                               {rulePrefill ? 'Скрыть форму' : 'Создать правило'}
                             </button>
-                            <button onClick={() => deleteRow(tx)}>Удалить</button>
+                            <button className="btn-danger btn-sm" onClick={() => deleteRow(tx)}>
+                              Удалить
+                            </button>
                           </div>
                           {rulePrefill && (
                             <RuleQuickForm
                               categories={categories}
                               prefill={rulePrefill}
                               onClose={() => setRulePrefill(null)}
+                              onCategoriesChanged={setCategories}
                               onCreated={() => {
                                 setRulePrefill(null)
                                 setExpandedRow(null)
@@ -289,23 +333,35 @@ export function ImportPage() {
                 ))}
                 {preview.transactions.length === 0 && (
                   <tr>
-                    <td colSpan={6}>Распознанных операций нет</td>
+                    <td colSpan={4}>Распознанных операций нет</td>
                   </tr>
                 )}
               </tbody>
             </table>
-          </section>
 
-          <div className="row">
-            <button onClick={() => setStep(1)}>Назад</button>
-            <button onClick={() => setStep(3)}>Далее</button>
-          </div>
+            <div className="wizard-footer">
+              <div className="group">
+                <button className="btn-secondary" onClick={onRecategorize} disabled={loading}>
+                  Применить правила
+                </button>
+                <Link className="link-btn" to="/rules" target="_blank" rel="noreferrer">
+                  Создать / изменить правила
+                </Link>
+              </div>
+              <div className="group">
+                <button className="btn-secondary" onClick={() => setStep(1)}>
+                  Назад
+                </button>
+                <button onClick={() => setStep(3)}>Далее →</button>
+              </div>
+            </div>
+          </section>
         </>
       )}
 
       {step === 3 && preview && (
         <section className="card">
-          <h2>Шаг 3. Подтверждение изменений</h2>
+          <h2>Подтверждение изменений</h2>
           <p>
             Будет импортировано <strong>{preview.validCount - preview.skippedDuplicates}</strong> операций
             (пропущено дубликатов: {preview.skippedDuplicates}).
@@ -319,8 +375,10 @@ export function ImportPage() {
               ))}
             </ul>
           )}
-          <div className="row">
-            <button onClick={() => setStep(2)}>Назад</button>
+          <div className="wizard-footer">
+            <button className="btn-secondary" onClick={() => setStep(2)}>
+              Назад
+            </button>
             <button onClick={onConfirm} disabled={loading}>
               {loading ? 'Импорт…' : 'Импортировать'}
             </button>
@@ -333,8 +391,8 @@ export function ImportPage() {
           <h2>Готово</h2>
           <div className="import-result">
             <p>
-              Статус: <strong>{result.status}</strong> · импортировано {result.importedCount} · пропущено
-              дубликатов {result.skippedDuplicates}
+              Статус: <strong>{result.status}</strong> · импортировано {result.importedCount} · пропущено дубликатов{' '}
+              {result.skippedDuplicates}
             </p>
           </div>
           <Link className="link-btn" to="/statements">

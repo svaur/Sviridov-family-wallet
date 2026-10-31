@@ -37,11 +37,13 @@ export function LoginPage() {
           <b>Sviridov · Семейный кошелёк</b>
         </div>
         <h1>Вход</h1>
+        <p className="login-sub">Личный и семейный учёт финансов по выпискам банка.</p>
         <label className="field">
           <span>Логин</span>
           <input
             value={username}
             onChange={(e) => setUsername(e.target.value)}
+            placeholder="ivan"
             autoComplete="username"
             autoFocus
           />
@@ -52,13 +54,15 @@ export function LoginPage() {
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
+            placeholder="••••••••"
             autoComplete="current-password"
           />
         </label>
         {error && <div className="error">{error}</div>}
-        <button type="submit" disabled={busy}>
+        <button type="submit" className="btn-block" disabled={busy}>
           {busy ? 'Вход…' : 'Войти'}
         </button>
+        <div className="login-note">Доступ по приглашению — пользователи создаются вручную.</div>
       </form>
     </div>
   )

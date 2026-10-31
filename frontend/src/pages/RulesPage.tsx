@@ -2,11 +2,14 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { useLocation } from 'react-router-dom'
 import { api, HttpError } from '../api'
 import { buildRuleParams } from '../ruleHelpers'
+import { CATEGORY_ICONS, DEFAULT_ICON } from '../icons'
+import { CategorySelect } from '../components/CategorySelect'
 
 interface Category {
   id: number
   parentId: number | null
   name: string
+  icon: string
 }
 
 interface Rule {
@@ -41,6 +44,7 @@ function paramsLabel(rule: Rule) {
 interface CategoryForm {
   name: string
   parentId: string
+  icon: string
 }
 
 interface RuleForm {
@@ -55,7 +59,7 @@ interface RuleForm {
   dayTo: string
 }
 
-const emptyCategory: CategoryForm = { name: '', parentId: '0' }
+const emptyCategory: CategoryForm = { name: '', parentId: '0', icon: DEFAULT_ICON }
 
 const emptyRule: RuleForm = {
   name: '',
@@ -146,7 +150,7 @@ export function RulesPage() {
 
   function startCatEdit(c: Category) {
     setCatEditingId(c.id)
-    setCatForm({ name: c.name, parentId: c.parentId == null ? '0' : String(c.parentId) })
+    setCatForm({ name: c.name, parentId: c.parentId == null ? '0' : String(c.parentId), icon: c.icon ?? DEFAULT_ICON })
     setCatFormError(null)
     setShowCatForm(true)
   }
@@ -164,6 +168,7 @@ export function RulesPage() {
       const payload = {
         name: catForm.name,
         parentId: catForm.parentId === '0' ? null : Number(catForm.parentId),
+        icon: catForm.icon,
       }
       if (catEditingId === null) {
         await api.post<Category>('/api/categories', payload)
@@ -289,193 +294,211 @@ export function RulesPage() {
       {error && <div className="error">{error}</div>}
 
       <section className="card">
-        <h2>Категории</h2>
-        {showCatForm ? (
-          <form className="form-grid" onSubmit={saveCategory}>
-            <label className="field">
-              <span>Название</span>
-              <input
-                value={catForm.name}
-                onChange={(e) => setCatForm({ ...catForm, name: e.target.value })}
-                required
-              />
-            </label>
-            <label className="field">
-              <span>Родительская категория</span>
-              <select
-                value={catForm.parentId}
-                onChange={(e) => setCatForm({ ...catForm, parentId: e.target.value })}
+        <div className="card-head">
+          <h2>Категории</h2>
+          <button type="button" className="btn-ghost btn-sm" onClick={showCatForm ? closeCatForm : startCatCreate}>
+            {showCatForm ? 'Скрыть форму' : '+ Категория'}
+          </button>
+        </div>
+
+        <div className="chip-list">
+          {categories.map((c) => (
+            <span key={c.id} className="chip" onClick={() => startCatEdit(c)} title="Нажмите, чтобы изменить">
+              <span className="chip-icon">{c.icon}</span>{c.name}
+              <button
+                type="button"
+                className="chip-x"
+                title="Удалить"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  deleteCategory(c)
+                }}
               >
-                <option value="0">— нет —</option>
-                {categories
-                  .filter((c) => c.id !== catEditingId)
-                  .map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-              </select>
-            </label>
+                ×
+              </button>
+            </span>
+          ))}
+          {categories.length === 0 && <span className="muted">Категорий пока нет — создайте первую</span>}
+        </div>
+
+        {showCatForm && (
+          <form className="rule-quick-form" onSubmit={saveCategory}>
+            <div className="form-grid">
+              <label className="field">
+                <span>Название</span>
+                <input
+                  value={catForm.name}
+                  onChange={(e) => setCatForm({ ...catForm, name: e.target.value })}
+                  required
+                />
+              </label>
+              <label className="field">
+                <span>Родительская категория</span>
+                <select
+                  value={catForm.parentId}
+                  onChange={(e) => setCatForm({ ...catForm, parentId: e.target.value })}
+                >
+                  <option value="0">— нет —</option>
+                  {categories
+                    .filter((c) => c.id !== catEditingId)
+                    .map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                </select>
+              </label>
+            </div>
+            <div className="field">
+              <span>Значок</span>
+              <div className="icon-picker">
+                {CATEGORY_ICONS.map((icon) => (
+                  <button
+                    key={icon}
+                    type="button"
+                    className={`icon-option${catForm.icon === icon ? ' selected' : ''}`}
+                    onClick={() => setCatForm({ ...catForm, icon })}
+                    title={icon}
+                  >
+                    {icon}
+                  </button>
+                ))}
+              </div>
+            </div>
             {catFormError && <div className="error">{catFormError}</div>}
             <div className="row">
               <button type="submit">{catEditingId === null ? 'Добавить' : 'Сохранить'}</button>
-              <button type="button" onClick={closeCatForm}>
+              <button type="button" className="btn-secondary" onClick={closeCatForm}>
                 Отмена
               </button>
             </div>
           </form>
-        ) : (
-          <div className="row">
-            <button type="button" onClick={startCatCreate}>
-              Создать категорию
-            </button>
-          </div>
         )}
-
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Название</th>
-              <th>Родитель</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {categories.map((c) => (
-              <tr key={c.id}>
-                <td>{c.name}</td>
-                <td>{categoryName(c.parentId)}</td>
-                <td className="row">
-                  <button onClick={() => startCatEdit(c)}>Изменить</button>
-                  <button onClick={() => deleteCategory(c)}>Удалить</button>
-                </td>
-              </tr>
-            ))}
-            {categories.length === 0 && (
-              <tr>
-                <td colSpan={3}>Категорий нет</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
       </section>
 
       <section className="card">
-        <h2>Правила</h2>
+        <div className="card-head">
+          <h2>Правила</h2>
+          <div className="row">
+            <button type="button" className="btn-secondary btn-sm" onClick={applyRules} disabled={applying}>
+              {applying ? 'Применяю…' : 'Применить правила'}
+            </button>
+            <button type="button" className="btn-sm" onClick={showRuleForm ? closeRuleForm : startRuleCreate}>
+              {showRuleForm ? 'Скрыть форму' : '+ Правило'}
+            </button>
+          </div>
+        </div>
+
         <p className="muted">Правило срабатывает, если совпадают все заполненные условия. Пустые поля игнорируются.</p>
-        {showRuleForm ? (
-          <form className="form-grid" onSubmit={saveRule}>
-            <label className="field">
-              <span>Имя правила</span>
-              <input
-                value={ruleForm.name}
-                onChange={(e) => setRuleForm({ ...ruleForm, name: e.target.value })}
-                placeholder="например: Продукты — Магнит"
-              />
-            </label>
-            <label className="field">
-              <span>Категория</span>
-              <select
-                value={ruleForm.categoryId}
-                onChange={(e) => setRuleForm({ ...ruleForm, categoryId: e.target.value })}
-                required
-              >
-                <option value="">— выберите —</option>
-                {categories.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="field">
-              <span>Приоритет</span>
-              <input
-                type="number"
-                value={ruleForm.priority}
-                onChange={(e) => setRuleForm({ ...ruleForm, priority: e.target.value })}
-              />
-            </label>
-            <label className="field">
-              <span>Назначение платежа (включая регулярные выражения)</span>
-              <input
-                value={ruleForm.purpose}
-                onChange={(e) => setRuleForm({ ...ruleForm, purpose: e.target.value })}
-                placeholder="например: оплата аренды или ^оплата"
-              />
-            </label>
-            <label className="field">
-              <span>Операция (включая регулярные выражения)</span>
-              <input
-                value={ruleForm.operation}
-                onChange={(e) => setRuleForm({ ...ruleForm, operation: e.target.value })}
-                placeholder="например: перевод или ^покупка"
-              />
-            </label>
-            <label className="field">
-              <span>Сумма от</span>
-              <input
-                type="number"
-                step="0.01"
-                min={0}
-                value={ruleForm.min}
-                onChange={(e) => setRuleForm({ ...ruleForm, min: e.target.value })}
-              />
-            </label>
-            <label className="field">
-              <span>Сумма до</span>
-              <input
-                type="number"
-                step="0.01"
-                min={0}
-                value={ruleForm.max}
-                onChange={(e) => setRuleForm({ ...ruleForm, max: e.target.value })}
-              />
-            </label>
-            <label className="field">
-              <span>День месяца от (1–31)</span>
-              <input
-                type="number"
-                min={1}
-                max={31}
-                value={ruleForm.dayFrom}
-                onChange={(e) => setRuleForm({ ...ruleForm, dayFrom: e.target.value })}
-              />
-            </label>
-            <label className="field">
-              <span>День месяца до (1–31)</span>
-              <input
-                type="number"
-                min={1}
-                max={31}
-                value={ruleForm.dayTo}
-                onChange={(e) => setRuleForm({ ...ruleForm, dayTo: e.target.value })}
-              />
-            </label>
+
+        {applyMsg && <div className={applyMsg.ok ? 'success' : 'error'}>{applyMsg.text}</div>}
+
+        {showRuleForm && (
+          <form className="rule-quick-form" onSubmit={saveRule}>
+            <div className="form-grid">
+              <label className="field">
+                <span>Имя правила</span>
+                <input
+                  value={ruleForm.name}
+                  onChange={(e) => setRuleForm({ ...ruleForm, name: e.target.value })}
+                  placeholder="например: Продукты — Магнит"
+                />
+              </label>
+              <label className="field">
+                <span>Категория</span>
+                <CategorySelect
+                  categories={categories}
+                  value={ruleForm.categoryId}
+                  onChange={(v) => setRuleForm({ ...ruleForm, categoryId: v })}
+                  onCreated={(c) => setCategories([...categories, { ...c, parentId: null }])}
+                  required
+                />
+              </label>
+            </div>
+
+            <div className="form-section-title">Что искать</div>
+            <div className="form-grid">
+              <label className="field">
+                <span>Назначение платежа (включая регулярные выражения)</span>
+                <input
+                  value={ruleForm.purpose}
+                  onChange={(e) => setRuleForm({ ...ruleForm, purpose: e.target.value })}
+                  placeholder="например: оплата аренды или ^оплата"
+                />
+              </label>
+              <label className="field">
+                <span>Операция (включая регулярные выражения)</span>
+                <input
+                  value={ruleForm.operation}
+                  onChange={(e) => setRuleForm({ ...ruleForm, operation: e.target.value })}
+                  placeholder="например: перевод или ^покупка"
+                />
+              </label>
+            </div>
+
+            <div className="form-section-title">Дополнительно</div>
+            <div className="form-grid">
+              <label className="field">
+                <span>Сумма от</span>
+                <input
+                  type="number"
+                  step="0.01"
+                  min={0}
+                  value={ruleForm.min}
+                  onChange={(e) => setRuleForm({ ...ruleForm, min: e.target.value })}
+                />
+              </label>
+              <label className="field">
+                <span>Сумма до</span>
+                <input
+                  type="number"
+                  step="0.01"
+                  min={0}
+                  value={ruleForm.max}
+                  onChange={(e) => setRuleForm({ ...ruleForm, max: e.target.value })}
+                />
+              </label>
+              <label className="field">
+                <span>День месяца от (1–31)</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={31}
+                  value={ruleForm.dayFrom}
+                  onChange={(e) => setRuleForm({ ...ruleForm, dayFrom: e.target.value })}
+                />
+              </label>
+              <label className="field">
+                <span>День месяца до (1–31)</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={31}
+                  value={ruleForm.dayTo}
+                  onChange={(e) => setRuleForm({ ...ruleForm, dayTo: e.target.value })}
+                />
+              </label>
+              <label className="field">
+                <span>Приоритет</span>
+                <input
+                  type="number"
+                  value={ruleForm.priority}
+                  onChange={(e) => setRuleForm({ ...ruleForm, priority: e.target.value })}
+                />
+              </label>
+            </div>
 
             {ruleFormError && <div className="error">{ruleFormError}</div>}
             <div className="row">
-              <button type="submit">{ruleEditingId === null ? 'Добавить' : 'Сохранить'}</button>
-              <button type="button" onClick={closeRuleForm}>
+              <button type="submit">{ruleEditingId === null ? 'Добавить правило' : 'Сохранить'}</button>
+              <button type="button" className="btn-secondary" onClick={closeRuleForm}>
                 Отмена
               </button>
             </div>
           </form>
-        ) : (
-          <div className="row">
-            <button type="button" onClick={startRuleCreate}>
-              Создать правило
-            </button>
-          </div>
         )}
-        <div className="row">
-          <button type="button" onClick={applyRules} disabled={applying}>
-            {applying ? 'Применяю…' : 'Применить правила'}
-          </button>
-          {applyMsg && <span className={applyMsg.ok ? 'success' : 'error'}>{applyMsg.text}</span>}
-        </div>
 
-        <table className="table">
+        <table className="table" style={{ marginTop: showRuleForm || applyMsg ? 16 : 0 }}>
           <thead>
             <tr>
               <th>Имя</th>
@@ -490,11 +513,19 @@ export function RulesPage() {
               <tr key={r.id}>
                 <td>{r.name ?? '—'}</td>
                 <td>{paramsLabel(r)}</td>
-                <td>{categoryName(r.categoryId)}</td>
+                <td>
+                  <span className="pill">{categoryName(r.categoryId)}</span>
+                </td>
                 <td>{r.priority}</td>
-                <td className="row">
-                  <button onClick={() => startRuleEdit(r)}>Изменить</button>
-                  <button onClick={() => deleteRule(r)}>Удалить</button>
+                <td>
+                  <div className="actions">
+                    <button className="btn-ghost btn-sm" onClick={() => startRuleEdit(r)}>
+                      Изменить
+                    </button>
+                    <button className="btn-danger btn-sm" onClick={() => deleteRule(r)}>
+                      Удалить
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}

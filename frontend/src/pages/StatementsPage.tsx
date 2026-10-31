@@ -93,27 +93,46 @@ export function StatementsPage() {
     ? statements.filter((s) => s.cardId === Number(cardFilter))
     : statements
 
+  const lastGap = gaps.length > 0 ? gaps[gaps.length - 1] : null
+
+  function statusBadge(status: string): string {
+    if (status === 'OK') return 'badge-ok'
+    if (status === 'PARTIAL') return 'badge-partial'
+    return 'badge-other'
+  }
+
   return (
     <div className="page">
-      <h1>Выписки</h1>
+      <div className="page-head">
+        <h1>Выписки</h1>
+        <Link className="link-btn filled" to="/import">+ Загрузить выписку</Link>
+      </div>
 
       {error && <div className="error">{error}</div>}
 
       <section className="card">
-        <h2>Загрузить выписку</h2>
-        <p className="muted">
-          PDF до 10 МБ. Загрузка проходит в три шага: файл → проверка категоризации → подтверждение. Карта
-          создаётся автоматически по номеру из выписки.
-        </p>
-        <Link className="link-btn" to="/import">
-          Загрузить выписку
-        </Link>
+        <h2>Загрузка выписки из PDF</h2>
+        <div className="steps">
+          <span>1. <b>Выбрать файл</b></span>
+          <span>→</span>
+          <span>2. <b>Проверить категории</b></span>
+          <span>→</span>
+          <span>3. <b>Подтвердить импорт</b></span>
+        </div>
+        <p className="muted">PDF до 10 МБ. Карта создаётся автоматически по номеру из выписки, сам файл не хранится.</p>
       </section>
 
-      <section>
-        <div className="row">
+      {lastGap && (
+        <div className="warning">
+          ⚠ Обнаружен пропуск по карте {cardOf(lastGap.cardId)?.displayName ?? '—'}: {fmtDate(lastGap.gapFrom)} — {fmtDate(lastGap.gapTo)}
+          {gaps.length > 1 ? ` (ещё ${gaps.length - 1})` : ''}
+        </div>
+      )}
+
+      <section className="card">
+        <div className="card-head">
           <h2>История выгрузок</h2>
-          <label className="field">
+          <label className="field" style={{ marginBottom: 0 }}>
             <span className="muted">Карта</span>
             <select value={cardFilter} onChange={(e) => setCardFilter(e.target.value)}>
               <option value="">Все карты</option>
@@ -142,7 +161,6 @@ export function StatementsPage() {
             <tbody>
               {visible.map((s) => {
                 const card = cardOf(s.cardId)
-                const number = s.cardNumberExtracted ?? card?.cardNumber ?? '—'
                 return (
                   <tr key={s.id}>
                     <td>{fmtInstant(s.uploadedAt)}</td>
@@ -157,15 +175,14 @@ export function StatementsPage() {
                             onChange={(e) => setRenameValue(e.target.value)}
                             autoFocus
                           />
-                          <button onClick={saveRename}>Сохранить</button>
-                          <button onClick={() => setRenamingCardId(null)}>Отмена</button>
+                          <button className="btn-sm" onClick={saveRename}>Сохранить</button>
+                          <button className="btn-secondary btn-sm" onClick={() => setRenamingCardId(null)}>Отмена</button>
                         </div>
                       ) : (
                         <div className="row">
                           <span>{card?.displayName ?? '—'}</span>
-                          <span className="muted">{number}</span>
                           {card && (
-                            <button className="link-btn" onClick={() => startRename(card)}>
+                            <button className="text-link" onClick={() => startRename(card)}>
                               переименовать
                             </button>
                           )}
@@ -175,7 +192,9 @@ export function StatementsPage() {
                     <td>
                       {s.txnCount} / {s.rowCountRaw}
                     </td>
-                    <td>{s.status}</td>
+                    <td>
+                      <span className={`badge ${statusBadge(s.status)}`}>{s.status}</span>
+                    </td>
                   </tr>
                 )
               })}
@@ -205,7 +224,7 @@ export function StatementsPage() {
                 <tr key={g.id}>
                   <td>{cardOf(g.cardId)?.displayName ?? '—'}</td>
                   <td>
-                    {fmtDate(g.gapFrom)} — {fmtDate(g.gapTo)}
+                    <span className="gap-tag">{fmtDate(g.gapFrom)} — {fmtDate(g.gapTo)}</span>
                   </td>
                   <td>{fmtInstant(g.detectedAt)}</td>
                 </tr>

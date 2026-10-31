@@ -1,16 +1,20 @@
 import { useState, type FormEvent } from 'react'
 import { api, HttpError } from '../api'
-import { buildRuleParams, ruleMatchesTemplate } from '../ruleHelpers'
+import { buildRuleParams, dayOfMonth, ruleMatchesTemplate } from '../ruleHelpers'
+import { CategorySelect } from './CategorySelect'
 
 interface Category {
   id: number
   name: string
+  icon: string
 }
 
 export interface RulePrefill {
   purpose: string | null
   operation: string | null
   categoryId: number | null
+  amount: number | null
+  date: string | null
 }
 
 interface RuleQuickFormProps {
@@ -18,28 +22,40 @@ interface RuleQuickFormProps {
   prefill: RulePrefill
   onClose: () => void
   onCreated: () => void
+  onCategoriesChanged: (categories: Category[]) => void
 }
 
 /**
  * Compact inline "create rule from example" form shown under a transaction row.
- * Pre-fills the counterparty and operation from the transaction; the user picks
- * the category and confirms. Priority defaults to 100, name is left empty.
+ * Pre-fills the counterparty, operation, amount and day-of-month from the
+ * transaction; the user picks the category and confirms. Priority defaults to
+ * 100, name is left empty.
  *
  * Before saving, it verifies the rule would match the template transaction. If
  * it would not, an inline warning is shown (instead of the browser's native
  * `confirm`, which can be suppressed) and the user can either force-save or
  * cancel.
  */
-export function RuleQuickForm({ categories, prefill, onClose, onCreated }: RuleQuickFormProps) {
+export function RuleQuickForm({ categories, prefill, onClose, onCreated, onCategoriesChanged }: RuleQuickFormProps) {
   const [categoryId, setCategoryId] = useState(prefill.categoryId != null ? String(prefill.categoryId) : '')
   const [purpose, setPurpose] = useState(prefill.purpose ?? '')
   const [operation, setOperation] = useState(prefill.operation ?? '')
+  const [min, setMin] = useState(prefill.amount != null ? String(prefill.amount) : '')
+  const [max, setMax] = useState(prefill.amount != null ? String(prefill.amount) : '')
+  const [dayFrom, setDayFrom] = useState(() => {
+    const d = dayOfMonth(prefill.date)
+    return d != null ? String(d) : ''
+  })
+  const [dayTo, setDayTo] = useState(() => {
+    const d = dayOfMonth(prefill.date)
+    return d != null ? String(d) : ''
+  })
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [warnMismatch, setWarnMismatch] = useState(false)
 
   function buildParams(): Record<string, string | number> {
-    return buildRuleParams({ purpose, operation, min: '', max: '', dayFrom: '', dayTo: '' })
+    return buildRuleParams({ purpose, operation, min, max, dayFrom, dayTo })
   }
 
   async function save(params: Record<string, string | number>) {
@@ -69,7 +85,15 @@ export function RuleQuickForm({ categories, prefill, onClose, onCreated }: RuleQ
     setError(null)
     const params = buildParams()
     const hasConditions = Object.keys(params).length > 0
-    if (hasConditions && !ruleMatchesTemplate(params, { purpose: prefill.purpose, operation: prefill.operation })) {
+    if (
+      hasConditions &&
+      !ruleMatchesTemplate(params, {
+        purpose: prefill.purpose,
+        operation: prefill.operation,
+        amount: prefill.amount,
+        date: prefill.date,
+      })
+    ) {
       setWarnMismatch(true)
       return
     }
@@ -82,14 +106,13 @@ export function RuleQuickForm({ categories, prefill, onClose, onCreated }: RuleQ
       <div className="form-grid">
         <label className="field">
           <span>Категория</span>
-          <select value={categoryId} onChange={(e) => setCategoryId(e.target.value)} required>
-            <option value="">— выберите —</option>
-            {categories.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
+          <CategorySelect
+            categories={categories}
+            value={categoryId}
+            onChange={setCategoryId}
+            onCreated={(c) => onCategoriesChanged([...categories, c])}
+            required
+          />
         </label>
         <label className="field">
           <span>Назначение платежа (включая регулярные выражения)</span>
@@ -100,11 +123,38 @@ export function RuleQuickForm({ categories, prefill, onClose, onCreated }: RuleQ
           <input value={operation} onChange={(e) => setOperation(e.target.value)} placeholder="например: перевод" />
         </label>
       </div>
+
+      <div className="form-section-title">Дополнительно (по сумме и дню месяца)</div>
+      <div className="form-grid">
+        <label className="field">
+          <span>Сумма от</span>
+          <input value={min} onChange={(e) => setMin(e.target.value)} placeholder="например: 347.85" inputMode="decimal" />
+        </label>
+        <label className="field">
+          <span>Сумма до</span>
+          <input value={max} onChange={(e) => setMax(e.target.value)} placeholder="например: 347.85" inputMode="decimal" />
+        </label>
+        <label className="field">
+          <span>День месяца от</span>
+          <input value={dayFrom} onChange={(e) => setDayFrom(e.target.value)} placeholder="1–31" inputMode="numeric" />
+        </label>
+        <label className="field">
+          <span>День месяца до</span>
+          <input value={dayTo} onChange={(e) => setDayTo(e.target.value)} placeholder="1–31" inputMode="numeric" />
+        </label>
+      </div>
+
       {warnMismatch && (
         <div className="warning">
           <p>Правило не применится на эту запись.</p>
           <div className="row">
-            <button type="button" onClick={() => { setWarnMismatch(false); void save(buildParams()) }}>
+            <button
+              type="button"
+              onClick={() => {
+                setWarnMismatch(false)
+                void save(buildParams())
+              }}
+            >
               Сохранить всё равно
             </button>
             <button type="button" onClick={() => setWarnMismatch(false)}>

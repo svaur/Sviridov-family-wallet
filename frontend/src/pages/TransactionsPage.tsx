@@ -1,7 +1,11 @@
-import { Fragment, useEffect, useState, type FormEvent } from 'react'
+import { Fragment, useEffect, useMemo, useState, type FormEvent } from 'react'
 import { api, HttpError } from '../api'
+import { CategoryPicker } from '../components/CategoryPicker'
+import { CategorySelect } from '../components/CategorySelect'
+import { CommentField } from '../components/CommentField'
 import { RuleQuickForm, type RulePrefill } from '../components/RuleQuickForm'
 import { fmtDate, fmtMoney } from '../format'
+import { DEFAULT_ICON } from '../icons'
 
 interface Transaction {
   id: number
@@ -15,17 +19,20 @@ interface Transaction {
   source: string
   cardId: number | null
   isTransfer: boolean
+  comment: string | null
 }
 
 interface Category {
   id: number
   name: string
+  icon: string
 }
 
 interface Card {
   id: number
   displayName: string
   last4: string | null
+  archived: boolean
 }
 
 interface TxForm {
@@ -53,12 +60,19 @@ export function TransactionsPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
+  const [showForm, setShowForm] = useState(false)
   const [txForm, setTxForm] = useState<TxForm>(emptyTx)
   const [txFormError, setTxFormError] = useState<string | null>(null)
 
+  const [search, setSearch] = useState('')
+  const [typeFilter, setTypeFilter] = useState('')
+  const [categoryFilter, setCategoryFilter] = useState('')
+  const [sourceFilter, setSourceFilter] = useState('')
+
   const [expandedId, setExpandedId] = useState<number | null>(null)
-  const [assignCat, setAssignCat] = useState('')
   const [rulePrefill, setRulePrefill] = useState<RulePrefill | null>(null)
+
+  const iconById = useMemo(() => new Map(categories.map((c) => [c.id, c.icon])), [categories])
 
   async function load() {
     setLoading(true)
@@ -81,6 +95,28 @@ export function TransactionsPage() {
   useEffect(() => {
     load()
   }, [])
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return transactions.filter((t) => {
+      if (typeFilter && t.type !== typeFilter) return false
+      if (categoryFilter === 'none') {
+        if (t.categoryId != null) return false
+      } else if (categoryFilter && String(t.categoryId) !== categoryFilter) {
+        return false
+      }
+      if (sourceFilter.startsWith('card:')) {
+        if (t.source !== 'card' || String(t.cardId) !== sourceFilter.slice(5)) return false
+      } else if (sourceFilter && t.source !== sourceFilter) {
+        return false
+      }
+      if (q) {
+        const hay = `${t.operation ?? ''} ${t.purpose ?? ''}`.toLowerCase()
+        if (!hay.includes(q)) return false
+      }
+      return true
+    })
+  }, [transactions, search, typeFilter, categoryFilter, sourceFilter])
 
   function errMessage(err: unknown) {
     if (err instanceof HttpError && err.fieldErrors.length > 0) {
@@ -114,6 +150,7 @@ export function TransactionsPage() {
       }
       await api.post<Transaction>('/api/transactions', payload)
       setTxForm(emptyTx)
+      setShowForm(false)
       await load()
     } catch (err) {
       setTxFormError(errMessage(err))
@@ -141,7 +178,6 @@ export function TransactionsPage() {
     } else {
       setExpandedId(id)
     }
-    setAssignCat('')
     setRulePrefill(null)
   }
 
@@ -161,15 +197,15 @@ export function TransactionsPage() {
       purpose: t.purpose ?? null,
       operation: t.operation ?? null,
       categoryId: t.categoryId,
+      amount: t.amount == null || t.amount === '' ? null : Number(t.amount),
+      date: t.date ?? null,
     })
   }
 
-  async function assignCategory(id: number) {
-    if (assignCat === '') return
+  async function assignCategory(id: number, categoryId: number) {
     try {
-      await api.post<Transaction>(`/api/transactions/${id}/category`, { categoryId: Number(assignCat) })
+      await api.post<Transaction>(`/api/transactions/${id}/category`, { categoryId })
       setExpandedId(null)
-      setAssignCat('')
       await load()
     } catch (e) {
       setError(e instanceof HttpError ? e.message : 'Не удалось назначить категорию')
@@ -186,151 +222,216 @@ export function TransactionsPage() {
     }
   }
 
+  function updateCommentLocal(id: number, comment: string | null) {
+    setTransactions((prev) => prev.map((t) => (t.id === id ? { ...t, comment } : t)))
+  }
+
+  const activeCards = cards.filter((c) => !c.archived)
+
   return (
     <div className="page">
-      <h1>Операции</h1>
+      <div className="page-head">
+        <h1>Операции</h1>
+        <button type="button" onClick={() => setShowForm((v) => !v)}>
+          {showForm ? 'Скрыть форму' : '+ Добавить операцию'}
+        </button>
+      </div>
 
       {error && <div className="error">{error}</div>}
 
-      <section className="card">
-        <h2>Добавить операцию вручную</h2>
-        <form className="form-grid" onSubmit={saveTx}>
-          <label className="field">
-            <span>Источник</span>
-            <select value={txForm.source} onChange={(e) => setTxForm({ ...txForm, source: e.target.value })} required>
-              <option value="">— выберите —</option>
-              <optgroup label="Карты">
-                {cards.map((c) => (
-                  <option key={c.id} value={`card:${c.id}`}>
-                    {c.last4 ? `${c.displayName} •••• ${c.last4}` : c.displayName}
-                  </option>
-                ))}
-              </optgroup>
-              <option value="cash">Наличные</option>
-              <option value="other">Другое</option>
-            </select>
-          </label>
-          <label className="field">
-            <span>Дата</span>
-            <input type="date" value={txForm.date} onChange={(e) => setTxForm({ ...txForm, date: e.target.value })} required />
-          </label>
-          <label className="field">
-            <span>Тип</span>
-            <select value={txForm.type} onChange={(e) => setTxForm({ ...txForm, type: e.target.value as 'debit' | 'credit' })}>
-              <option value="debit">Расход</option>
-              <option value="credit">Приход</option>
-            </select>
-          </label>
-          <label className="field">
-            <span>Сумма</span>
-            <input type="number" step="0.01" min={0.01} value={txForm.amount} onChange={(e) => setTxForm({ ...txForm, amount: e.target.value })} required />
-          </label>
-          <label className="field">
-            <span>Назначение платежа</span>
-            <input value={txForm.purpose} onChange={(e) => setTxForm({ ...txForm, purpose: e.target.value })} placeholder="например: Покупка в Магните" />
-          </label>
-          <label className="field">
-            <span>Категория</span>
-            <select value={txForm.categoryId} onChange={(e) => setTxForm({ ...txForm, categoryId: e.target.value })}>
-              <option value="">— авто (по правилам) —</option>
-              {categories.map((c) => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
-            </select>
-          </label>
-          {txFormError && <div className="error">{txFormError}</div>}
-          <div className="row">
-            <button type="submit">Добавить</button>
-          </div>
-        </form>
-      </section>
+      {showForm && (
+        <section className="card">
+          <h2>Добавить операцию вручную</h2>
+          <form className="form-grid" onSubmit={saveTx}>
+            <label className="field">
+              <span>Источник</span>
+              <select value={txForm.source} onChange={(e) => setTxForm({ ...txForm, source: e.target.value })} required>
+                <option value="">— выберите —</option>
+                <optgroup label="Карты">
+                  {activeCards.map((c) => (
+                    <option key={c.id} value={`card:${c.id}`}>
+                      {c.last4 ? `${c.displayName} •••• ${c.last4}` : c.displayName}
+                    </option>
+                  ))}
+                </optgroup>
+                <option value="cash">Наличные</option>
+                <option value="other">Другое</option>
+              </select>
+            </label>
+            <label className="field">
+              <span>Дата</span>
+              <input type="date" value={txForm.date} onChange={(e) => setTxForm({ ...txForm, date: e.target.value })} required />
+            </label>
+            <label className="field">
+              <span>Тип</span>
+              <select value={txForm.type} onChange={(e) => setTxForm({ ...txForm, type: e.target.value as 'debit' | 'credit' })}>
+                <option value="debit">Расход</option>
+                <option value="credit">Приход</option>
+              </select>
+            </label>
+            <label className="field">
+              <span>Сумма</span>
+              <input type="number" step="0.01" min={0.01} value={txForm.amount} onChange={(e) => setTxForm({ ...txForm, amount: e.target.value })} required />
+            </label>
+            <label className="field">
+              <span>Назначение платежа</span>
+              <input value={txForm.purpose} onChange={(e) => setTxForm({ ...txForm, purpose: e.target.value })} placeholder="например: Покупка в Магните" />
+            </label>
+            <label className="field">
+              <span>Категория</span>
+              <CategorySelect
+                categories={categories}
+                value={txForm.categoryId}
+                onChange={(v) => setTxForm({ ...txForm, categoryId: v })}
+                onCreated={(c) => setCategories([...categories, c])}
+                allowAuto
+              />
+            </label>
+            {txFormError && <div className="error">{txFormError}</div>}
+            <div className="row">
+              <button type="submit">Добавить</button>
+              <button type="button" className="btn-secondary" onClick={() => { setShowForm(false); setTxForm(emptyTx); setTxFormError(null) }}>
+                Отмена
+              </button>
+            </div>
+          </form>
+        </section>
+      )}
 
-      <section>
-        {loading ? (
-          <p>Загрузка…</p>
-        ) : (
-          <>
-            <p className="muted">Нажмите на операцию, чтобы удалить её, назначить категорию или создать правило.</p>
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Дата</th>
-                  <th>Операция</th>
-                  <th>Назначение платежа</th>
-                  <th>Категория</th>
-                  <th>Источник</th>
-                  <th style={{ textAlign: 'right' }}>Сумма</th>
-                </tr>
-              </thead>
-              <tbody>
-                {transactions.map((t) => (
-                  <Fragment key={t.id}>
-                    <tr className="tx-row" onClick={() => toggleRow(t.id)}>
-                      <td>{fmtDate(t.date)}</td>
-                      <td>{t.operation ?? '—'}</td>
-                      <td>{t.purpose ?? '—'}</td>
-                      <td>{t.categoryName ?? '—'}</td>
-                      <td>
-                        <span className={`badge ${badgeClass(t.source)}`}>{sourceLabel(t)}</span>{' '}
-                        {t.isTransfer && <span className="badge badge-transfer">перевод</span>}
-                      </td>
-                      <td className={t.type === 'debit' ? 'amount-debit' : 'amount-credit'}>
-                        {t.type === 'debit' ? '− ' : '+ '}
-                        {fmtMoney(t.amount)}
-                      </td>
-                    </tr>
-                    {expandedId === t.id && (
-                      <tr>
-                        <td colSpan={6}>
-                          <div className="tx-actions">
-                            <select
-                              value={assignCat}
-                              onChange={(e) => setAssignCat(e.target.value)}
-                              aria-label="Категория вручную"
-                            >
-                              <option value="">— категория —</option>
-                              {categories.map((c) => (
-                                <option key={c.id} value={c.id}>{c.name}</option>
-                              ))}
-                            </select>
-                            <button onClick={() => assignCategory(t.id)} disabled={assignCat === ''}>
-                              Назначить категорию
-                            </button>
-                            <button onClick={() => (rulePrefill ? setRulePrefill(null) : createRuleFrom(t))}>
-                              {rulePrefill ? 'Скрыть форму' : 'Создать правило'}
-                            </button>
-                            {!t.isTransfer && (
-                              <button onClick={() => markTransfer(t.id)}>Это перевод</button>
-                            )}
-                            <button onClick={() => deleteTx(t)}>Удалить</button>
-                          </div>
-                          {rulePrefill && (
-                            <RuleQuickForm
-                              categories={categories}
-                              prefill={rulePrefill}
-                              onClose={() => setRulePrefill(null)}
-                              onCreated={() => {
-                                setRulePrefill(null)
-                                setExpandedId(null)
-                                load()
-                              }}
-                            />
-                          )}
-                        </td>
-                      </tr>
+      <div className="filter-bar">
+        <input
+          type="text"
+          placeholder="Поиск по назначению / операции…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          style={{ width: 240 }}
+        />
+        <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
+          <option value="">Все типы</option>
+          <option value="debit">Расход</option>
+          <option value="credit">Приход</option>
+        </select>
+        <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
+          <option value="">Все категории</option>
+          <option value="none">Без категории</option>
+          {categories.map((c) => (
+            <option key={c.id} value={c.id}>{c.name}</option>
+          ))}
+        </select>
+        <select value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)}>
+          <option value="">Все источники</option>
+          <optgroup label="Карты">
+            {activeCards.map((c) => (
+              <option key={c.id} value={`card:${c.id}`}>карта •••• {c.last4}</option>
+            ))}
+          </optgroup>
+          <option value="cash">Наличные</option>
+          <option value="other">Другое</option>
+          <option value="statement">Выписка</option>
+        </select>
+      </div>
+
+      {loading ? (
+        <p>Загрузка…</p>
+      ) : (
+        <table className="table">
+          <thead>
+            <tr>
+              <th>Дата</th>
+              <th>Операция</th>
+              <th>Назначение платежа</th>
+              <th>Категория</th>
+              <th>Источник</th>
+              <th style={{ textAlign: 'right' }}>Сумма</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((t) => (
+              <Fragment key={t.id}>
+                <tr
+                  className={expandedId === t.id ? 'tx-row open' : 'tx-row'}
+                  onClick={() => toggleRow(t.id)}
+                >
+                  <td>{fmtDate(t.date)}</td>
+                  <td>{t.operation ?? '—'}</td>
+                  <td>
+                    {t.purpose ?? '—'}
+                    {t.comment && <div className="muted" style={{ fontSize: 12 }}>💬 {t.comment}</div>}
+                  </td>
+                  <td>
+                    {t.categoryName ? (
+                      <span className="pill">{iconById.get(t.categoryId ?? 0) ?? DEFAULT_ICON} {t.categoryName}</span>
+                    ) : (
+                      '—'
                     )}
-                  </Fragment>
-                ))}
-                {transactions.length === 0 && (
+                  </td>
+                  <td>
+                    <span className={`badge ${badgeClass(t.source)}`}>{sourceLabel(t)}</span>{' '}
+                    {t.isTransfer && <span className="badge badge-transfer">перевод</span>}
+                  </td>
+                  <td className={t.type === 'debit' ? 'amount-debit' : 'amount-credit'}>
+                    {t.isTransfer ? (
+                      <span className="muted">исключено</span>
+                    ) : (
+                      <>{t.type === 'debit' ? '− ' : '+ '}{fmtMoney(t.amount)}</>
+                    )}
+                  </td>
+                </tr>
+                {expandedId === t.id && (
                   <tr>
-                    <td colSpan={6}>Операций пока нет</td>
+                    <td colSpan={6}>
+                      <div className="tx-actions">
+                        <CategoryPicker
+                          categories={categories}
+                          onAssign={(cid) => assignCategory(t.id, cid)}
+                          onCategoriesChanged={setCategories}
+                        />
+                        <button
+                          className="btn-secondary btn-sm"
+                          onClick={() => (rulePrefill ? setRulePrefill(null) : createRuleFrom(t))}
+                        >
+                          {rulePrefill ? 'Скрыть форму' : 'Создать правило'}
+                        </button>
+                        {!t.isTransfer && (
+                          <button className="btn-secondary btn-sm" onClick={() => markTransfer(t.id)}>
+                            Это перевод
+                          </button>
+                        )}
+                        <button className="btn-danger btn-sm" onClick={() => deleteTx(t)}>Удалить</button>
+                      </div>
+                      <div className="tx-actions">
+                        <CommentField
+                          id={t.id}
+                          comment={t.comment}
+                          onSaved={(c) => updateCommentLocal(t.id, c)}
+                        />
+                      </div>
+                      {rulePrefill && (
+                        <RuleQuickForm
+                          categories={categories}
+                          prefill={rulePrefill}
+                          onClose={() => setRulePrefill(null)}
+                          onCategoriesChanged={setCategories}
+                          onCreated={() => {
+                            setRulePrefill(null)
+                            setExpandedId(null)
+                            load()
+                          }}
+                        />
+                      )}
+                    </td>
                   </tr>
                 )}
-              </tbody>
-            </table>
-          </>
-        )}
-      </section>
+              </Fragment>
+            ))}
+            {filtered.length === 0 && (
+              <tr>
+                <td colSpan={6}>Нет операций</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      )}
     </div>
   )
 }

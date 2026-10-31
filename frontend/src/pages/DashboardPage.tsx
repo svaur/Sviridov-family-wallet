@@ -122,7 +122,7 @@ export function DashboardPage() {
       <header className="topbar">
         <h1>Дашборд</h1>
         <div className="topbar-right">
-          <Link className="link-btn" to="/cards">Карты</Link>
+          <Link className="link-btn" to="/statements">Выписки</Link>
           <Link className="link-btn" to="/rules">Правила</Link>
           <Link className="link-btn" to="/transactions">Операции</Link>
           <span className="muted">{user?.username}</span>

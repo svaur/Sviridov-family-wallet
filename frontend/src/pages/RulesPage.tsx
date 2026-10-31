@@ -290,7 +290,7 @@ export function RulesPage() {
         <h1>Правила и категории</h1>
         <div className="topbar-right">
           <Link className="link-btn" to="/">Дашборд</Link>
-          <Link className="link-btn" to="/cards">Карты</Link>
+          <Link className="link-btn" to="/statements">Выписки</Link>
           <Link className="link-btn" to="/transactions">Операции</Link>
           <span className="muted">{user?.username}</span>
           <button onClick={() => logout()}>Выйти</button>

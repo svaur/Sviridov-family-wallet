@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { api, HttpError } from '../api'
 import { useAuth } from '../auth/AuthContext'
 import { fmtDate, fmtInstant } from '../format'
 
 interface Card {
   id: number
+  cardNumber: string
   displayName: string
-  bank: string | null
   last4: string | null
   currency: string
   archived: boolean
@@ -29,21 +29,25 @@ interface Statement {
 }
 
 export function StatementsPage() {
-  const { cardId } = useParams()
   const { user, logout } = useAuth()
-  const [card, setCard] = useState<Card | null>(null)
+  const [cards, setCards] = useState<Card[]>([])
   const [statements, setStatements] = useState<Statement[]>([])
+  const [cardFilter, setCardFilter] = useState<string>('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const id = Number(cardId)
+  const [renamingCardId, setRenamingCardId] = useState<number | null>(null)
+  const [renameValue, setRenameValue] = useState('')
 
   async function load() {
     setLoading(true)
     try {
-      const cards = await api.get<Card[]>('/api/cards')
-      setCard(cards.find((c) => c.id === id) ?? null)
-      setStatements(await api.get<Statement[]>(`/api/cards/${id}/statements`))
+      const [allCards, allStatements] = await Promise.all([
+        api.get<Card[]>('/api/cards'),
+        api.get<Statement[]>('/api/statements'),
+      ])
+      setCards(allCards)
+      setStatements(allStatements)
     } catch (e) {
       setError(e instanceof HttpError ? e.message : 'Не удалось загрузить данные')
     } finally {
@@ -53,15 +57,46 @@ export function StatementsPage() {
 
   useEffect(() => {
     load()
-  }, [id])
+  }, [])
+
+  function cardOf(id: number): Card | undefined {
+    return cards.find((c) => c.id === id)
+  }
+
+  function startRename(card: Card) {
+    setRenamingCardId(card.id)
+    setRenameValue(card.displayName)
+  }
+
+  async function saveRename() {
+    if (renamingCardId === null) return
+    setError(null)
+    try {
+      await api.put<Card>(`/api/cards/${renamingCardId}`, { displayName: renameValue })
+      setRenamingCardId(null)
+      await load()
+    } catch (e) {
+      setError(e instanceof HttpError ? e.message : 'Не удалось переименовать карту')
+    }
+  }
+
+  const visible = cardFilter
+    ? statements.filter((s) => s.cardId === Number(cardFilter))
+    : statements
 
   return (
     <div className="page">
       <header className="topbar">
-        <h1>Выписки — {card?.displayName ?? `карта #${id}`}</h1>
+        <h1>Выписки</h1>
         <div className="topbar-right">
-          <Link className="link-btn" to="/cards">
-            ← Карты
+          <Link className="link-btn" to="/">
+            Дашборд
+          </Link>
+          <Link className="link-btn" to="/rules">
+            Правила
+          </Link>
+          <Link className="link-btn" to="/transactions">
+            Операции
           </Link>
           <span className="muted">{user?.username}</span>
           <button onClick={() => logout()}>Выйти</button>
@@ -72,13 +107,31 @@ export function StatementsPage() {
 
       <section className="card">
         <h2>Загрузить выписку</h2>
-        <p className="muted">PDF до 10 МБ. Загрузка проходит в три шага: файл → проверка категоризации → подтверждение.</p>
-        <Link className="link-btn" to={`/cards/${id}/import`}>
+        <p className="muted">
+          PDF до 10 МБ. Загрузка проходит в три шага: файл → проверка категоризации → подтверждение. Карта
+          создаётся автоматически по номеру из выписки.
+        </p>
+        <Link className="link-btn" to="/import">
           Загрузить выписку
         </Link>
       </section>
 
       <section>
+        <div className="row">
+          <h2>История выгрузок</h2>
+          <label className="field">
+            <span className="muted">Карта</span>
+            <select value={cardFilter} onChange={(e) => setCardFilter(e.target.value)}>
+              <option value="">Все карты</option>
+              {cards.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.displayName}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+
         {loading ? (
           <p>Загрузка…</p>
         ) : (
@@ -87,26 +140,52 @@ export function StatementsPage() {
               <tr>
                 <th>Загружена</th>
                 <th>Период</th>
+                <th>Карта</th>
                 <th>Строк</th>
                 <th>Статус</th>
-                <th>Карта в выписке</th>
               </tr>
             </thead>
             <tbody>
-              {statements.map((s) => (
-                <tr key={s.id}>
-                  <td>{fmtInstant(s.uploadedAt)}</td>
-                  <td>
-                    {fmtDate(s.periodFrom)} — {fmtDate(s.periodTo)}
-                  </td>
-                  <td>
-                    {s.txnCount} / {s.rowCountRaw}
-                  </td>
-                  <td>{s.status}</td>
-                  <td>{s.cardNumberExtracted ?? '—'}</td>
-                </tr>
-              ))}
-              {statements.length === 0 && (
+              {visible.map((s) => {
+                const card = cardOf(s.cardId)
+                const number = s.cardNumberExtracted ?? card?.cardNumber ?? '—'
+                return (
+                  <tr key={s.id}>
+                    <td>{fmtInstant(s.uploadedAt)}</td>
+                    <td>
+                      {fmtDate(s.periodFrom)} — {fmtDate(s.periodTo)}
+                    </td>
+                    <td>
+                      {renamingCardId === s.cardId ? (
+                        <div className="row">
+                          <input
+                            value={renameValue}
+                            onChange={(e) => setRenameValue(e.target.value)}
+                            autoFocus
+                          />
+                          <button onClick={saveRename}>Сохранить</button>
+                          <button onClick={() => setRenamingCardId(null)}>Отмена</button>
+                        </div>
+                      ) : (
+                        <div className="row">
+                          <span>{card?.displayName ?? '—'}</span>
+                          <span className="muted">{number}</span>
+                          {card && (
+                            <button className="link-btn" onClick={() => startRename(card)}>
+                              переименовать
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </td>
+                    <td>
+                      {s.txnCount} / {s.rowCountRaw}
+                    </td>
+                    <td>{s.status}</td>
+                  </tr>
+                )
+              })}
+              {visible.length === 0 && (
                 <tr>
                   <td colSpan={5}>Выписок пока нет</td>
                 </tr>

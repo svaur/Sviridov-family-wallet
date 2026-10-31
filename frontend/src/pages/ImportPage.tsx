@@ -1,15 +1,9 @@
 import { Fragment, useEffect, useState, type FormEvent } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { api, HttpError } from '../api'
 import { useAuth } from '../auth/AuthContext'
 import { RuleQuickForm, type RulePrefill } from '../components/RuleQuickForm'
 import { fmtDate, fmtMoney } from '../format'
-
-interface Card {
-  id: number
-  displayName: string
-  last4: string | null
-}
 
 interface Category {
   id: number
@@ -53,18 +47,14 @@ interface ImportResult {
 }
 
 export function ImportPage() {
-  const { cardId } = useParams()
   const { user, logout } = useAuth()
-  const id = Number(cardId)
 
-  const [card, setCard] = useState<Card | null>(null)
   const [step, setStep] = useState(1)
   const [file, setFile] = useState<File | null>(null)
   const [preview, setPreview] = useState<Preview | null>(null)
   const [result, setResult] = useState<ImportResult | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [mismatch, setMismatch] = useState<string | null>(null)
 
   const [categories, setCategories] = useState<Category[]>([])
   const [expandedRow, setExpandedRow] = useState<number | null>(null)
@@ -73,33 +63,24 @@ export function ImportPage() {
 
   useEffect(() => {
     api
-      .get<Card[]>('/api/cards')
-      .then((cards) => setCard(cards.find((c) => c.id === id) ?? null))
-      .catch(() => {})
-    api
       .get<Category[]>('/api/categories')
       .then(setCategories)
       .catch(() => {})
-  }, [id])
+  }, [])
 
   async function onChooseFile(e: FormEvent) {
     e.preventDefault()
     setError(null)
-    setMismatch(null)
     if (!file) {
       setError('Выберите файл')
       return
     }
     setLoading(true)
     try {
-      setPreview(await api.upload<Preview>(`/api/cards/${id}/statements/preview`, file))
+      setPreview(await api.upload<Preview>('/api/statements/preview', file))
       setStep(2)
     } catch (err) {
-      if (err instanceof HttpError && err.status === 409) {
-        setMismatch(err.message)
-      } else {
-        setError(err instanceof HttpError ? err.message : 'Не удалось разобрать выписку')
-      }
+      setError(err instanceof HttpError ? err.message : 'Не удалось разобрать выписку')
     } finally {
       setLoading(false)
     }
@@ -110,9 +91,7 @@ export function ImportPage() {
     setLoading(true)
     setError(null)
     try {
-      setPreview(
-        await api.post<Preview>(`/api/cards/${id}/statements/preview/${preview.draftId}/recategorize`),
-      )
+      setPreview(await api.post<Preview>(`/api/statements/preview/${preview.draftId}/recategorize`))
     } catch (err) {
       setError(err instanceof HttpError ? err.message : 'Не удалось применить правила')
     } finally {
@@ -125,7 +104,7 @@ export function ImportPage() {
     setLoading(true)
     setError(null)
     try {
-      setResult(await api.post<ImportResult>(`/api/cards/${id}/statements/preview/${preview.draftId}/confirm`))
+      setResult(await api.post<ImportResult>(`/api/statements/preview/${preview.draftId}/confirm`))
       setStep(4)
     } catch (err) {
       setError(err instanceof HttpError ? err.message : 'Не удалось импортировать выписку')
@@ -150,7 +129,7 @@ export function ImportPage() {
     try {
       setPreview(
         await api.post<Preview>(
-          `/api/cards/${id}/statements/preview/${preview.draftId}/transactions/${tx.rowNumber}/category`,
+          `/api/statements/preview/${preview.draftId}/transactions/${tx.rowNumber}/category`,
           { categoryId: Number(assignCat) },
         ),
       )
@@ -166,9 +145,7 @@ export function ImportPage() {
     setError(null)
     try {
       setPreview(
-        await api.del<Preview>(
-          `/api/cards/${id}/statements/preview/${preview.draftId}/transactions/${tx.rowNumber}`,
-        ),
+        await api.del<Preview>(`/api/statements/preview/${preview.draftId}/transactions/${tx.rowNumber}`),
       )
       setExpandedRow(null)
     } catch (err) {
@@ -187,9 +164,9 @@ export function ImportPage() {
   return (
     <div className="page">
       <header className="topbar">
-        <h1>Загрузка выписки — {card?.displayName ?? `карта #${id}`}</h1>
+        <h1>Загрузка выписки</h1>
         <div className="topbar-right">
-          <Link className="link-btn" to={`/cards/${id}/statements`}>
+          <Link className="link-btn" to="/statements">
             ← Выписки
           </Link>
           <span className="muted">{user?.username}</span>
@@ -216,14 +193,6 @@ export function ImportPage() {
               </button>
             </div>
           </form>
-          {mismatch && (
-            <div className="warning">
-              <p>{mismatch}</p>
-              <Link className="link-btn" to="/cards">
-                Создать карту
-              </Link>
-            </div>
-          )}
         </section>
       )}
 
@@ -380,7 +349,7 @@ export function ImportPage() {
               дубликатов {result.skippedDuplicates}
             </p>
           </div>
-          <Link className="link-btn" to={`/cards/${id}/statements`}>
+          <Link className="link-btn" to="/statements">
             К списку выписок
           </Link>
         </section>

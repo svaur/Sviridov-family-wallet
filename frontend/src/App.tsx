@@ -1,7 +1,6 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { AuthProvider } from './auth/AuthContext'
 import { RequireAuth } from './components/RequireAuth'
-import { CardsPage } from './pages/CardsPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { ImportPage } from './pages/ImportPage'
 import { LoginPage } from './pages/LoginPage'
@@ -22,17 +21,9 @@ export default function App() {
             </RequireAuth>
           }
         />
-        <Route
-          path="/cards"
-          element={
-            <RequireAuth>
-              <CardsPage />
-            </RequireAuth>
-          }
-        />
         <Route path="/dashboard" element={<Navigate to="/" replace />} />
         <Route
-          path="/cards/:cardId/statements"
+          path="/statements"
           element={
             <RequireAuth>
               <StatementsPage />
@@ -40,7 +31,7 @@ export default function App() {
           }
         />
         <Route
-          path="/cards/:cardId/import"
+          path="/import"
           element={
             <RequireAuth>
               <ImportPage />

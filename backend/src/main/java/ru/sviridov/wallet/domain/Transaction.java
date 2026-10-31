@@ -12,15 +12,24 @@ import java.time.Instant;
 import java.time.LocalDate;
 
 /**
- * A single operation row imported from a bank statement. {@code amount} holds
- * the value of the filled column (Расход→debit, Приход→credit); the opposite
- * column is always null. {@code fingerprint} is the SHA-256 dedup key; rows are
- * soft-deleted via {@code deletedAt} (tombstone). {@code merchantNormalized} and
- * {@code categoryId} are filled during import by the normalizer/categorizer.
+ * A single operation row. {@code amount} holds the value of the filled column
+ * (Расход→debit, Приход→credit); the opposite column is always null.
+ * {@code source} records the funding source: a bank statement import
+ * ({@link #SOURCE_STATEMENT}) or a manual entry tied to a card, cash or other
+ * ({@link #SOURCE_CARD}, {@link #SOURCE_CASH}, {@link #SOURCE_OTHER}); the card
+ * is optional (null for cash/other). {@code fingerprint} is the SHA-256 dedup
+ * key for statement rows; rows are soft-deleted via {@code deletedAt} (tombstone).
+ * {@code merchantNormalized} and {@code categoryId} are filled by the
+ * normalizer/categorizer.
  */
 @Entity
 @Table(name = "transactions")
 public class Transaction {
+
+    public static final String SOURCE_STATEMENT = "statement";
+    public static final String SOURCE_CARD = "card";
+    public static final String SOURCE_CASH = "cash";
+    public static final String SOURCE_OTHER = "other";
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -29,7 +38,7 @@ public class Transaction {
     @Column(name = "user_id", nullable = false)
     private Long userId;
 
-    @Column(name = "card_id", nullable = false)
+    @Column(name = "card_id")
     private Long cardId;
 
     @Column(name = "statement_id")
@@ -55,6 +64,9 @@ public class Transaction {
 
     @Column(nullable = false, length = 10)
     private String type;
+
+    @Column(nullable = false, length = 20)
+    private String source;
 
     @Column(name = "category_id")
     private Long categoryId;
@@ -90,6 +102,7 @@ public class Transaction {
         this.purpose = purpose;
         this.amount = amount;
         this.type = type;
+        this.source = SOURCE_STATEMENT;
         this.fingerprint = fingerprint;
         this.isTransfer = false;
         this.isExcluded = false;
@@ -146,6 +159,14 @@ public class Transaction {
 
     public String getType() {
         return type;
+    }
+
+    public String getSource() {
+        return source;
+    }
+
+    public void setSource(String source) {
+        this.source = source;
     }
 
     public Long getCategoryId() {

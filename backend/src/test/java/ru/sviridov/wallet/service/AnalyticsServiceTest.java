@@ -14,6 +14,7 @@ import ru.sviridov.wallet.web.dto.AnalyticsResponse;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
@@ -56,7 +57,7 @@ class AnalyticsServiceTest {
                 .thenReturn(List.of(debit, credit, transfer, excluded, outOfRange));
         when(categoryRepository.findByUserIdOrderByNameAsc(1L)).thenReturn(List.of());
 
-        AnalyticsResponse r = service.analytics(1L, from, to);
+        AnalyticsResponse r = service.analytics(1L, from, to, Set.of());
 
         assertThat(r.income()).isEqualByComparingTo(new BigDecimal("250.00"));
         assertThat(r.expense()).isEqualByComparingTo(new BigDecimal("100.00"));
@@ -72,7 +73,7 @@ class AnalyticsServiceTest {
         when(transactionRepository.findActiveByUserId(1L)).thenReturn(List.of(jan));
         when(categoryRepository.findByUserIdOrderByNameAsc(1L)).thenReturn(List.of());
 
-        AnalyticsResponse r = service.analytics(1L, from, to);
+        AnalyticsResponse r = service.analytics(1L, from, to, Set.of());
 
         assertThat(r.monthly()).hasSize(3);
         assertThat(r.monthly().get(0).month()).isEqualTo("2026-01");
@@ -98,7 +99,7 @@ class AnalyticsServiceTest {
         when(transactionRepository.findActiveByUserId(1L)).thenReturn(List.of(cat1, uncat, credit));
         when(categoryRepository.findByUserIdOrderByNameAsc(1L)).thenReturn(List.of(category));
 
-        AnalyticsResponse r = service.analytics(1L, from, to);
+        AnalyticsResponse r = service.analytics(1L, from, to, Set.of());
 
         assertThat(r.categories()).hasSize(2);
         assertThat(r.categories().get(0).categoryId()).isNull();
@@ -107,5 +108,26 @@ class AnalyticsServiceTest {
         assertThat(r.categories().get(1).categoryId()).isEqualTo(1L);
         assertThat(r.categories().get(1).categoryName()).isEqualTo("Продукты");
         assertThat(r.categories().get(1).amount()).isEqualByComparingTo(new BigDecimal("30.00"));
+    }
+
+    @Test
+    void excludesRequestedCategoriesAndUncategorized() {
+        LocalDate from = LocalDate.of(2026, 1, 1);
+        LocalDate to = LocalDate.of(2026, 1, 31);
+        Transaction cat1 = tx(LocalDate.of(2026, 1, 5), "debit", "30.00", 1L);
+        Transaction uncat = tx(LocalDate.of(2026, 1, 6), "debit", "70.00", null);
+        Transaction cat2 = tx(LocalDate.of(2026, 1, 7), "debit", "40.00", 2L);
+
+        when(transactionRepository.findActiveByUserId(1L)).thenReturn(List.of(cat1, uncat, cat2));
+        when(categoryRepository.findByUserIdOrderByNameAsc(1L)).thenReturn(List.of());
+
+        AnalyticsResponse r = service.analytics(1L, from, to,
+                Set.of(1L, AnalyticsService.UNCATEGORIZED));
+
+        // cat1 (id 1) and the uncategorized bucket (sentinel 0) are excluded; only cat2 remains.
+        assertThat(r.expense()).isEqualByComparingTo(new BigDecimal("40.00"));
+        assertThat(r.categories()).hasSize(1);
+        assertThat(r.categories().get(0).categoryId()).isEqualTo(2L);
+        assertThat(r.categories().get(0).amount()).isEqualByComparingTo(new BigDecimal("40.00"));
     }
 }

@@ -25,11 +25,11 @@ import java.util.regex.PatternSyntaxException;
 public class CategorizationEngine {
 
     private final ObjectMapper objectMapper;
-    private final MerchantNormalizer merchantNormalizer;
+    private final TextNormalizer textNormalizer;
 
-    public CategorizationEngine(ObjectMapper objectMapper, MerchantNormalizer merchantNormalizer) {
+    public CategorizationEngine(ObjectMapper objectMapper, TextNormalizer textNormalizer) {
         this.objectMapper = objectMapper;
-        this.merchantNormalizer = merchantNormalizer;
+        this.textNormalizer = textNormalizer;
     }
 
     public Long categorize(Transaction tx, List<Rule> rules) {
@@ -43,41 +43,16 @@ public class CategorizationEngine {
 
     private boolean matches(Rule rule, Transaction tx) {
         Map<String, Object> params = parseParams(rule.getParams());
-        if (params.isEmpty()) {
+        if (params.isEmpty() || !hasKnownCondition(params)) {
             return false;
-        }
-
-        String merchant = tx.getMerchantNormalized();
-
-        if (params.containsKey(Rule.KEY_MERCHANT_CONTAINS)) {
-            String needle = merchantNormalizer.normalizeCore(asString(params.get(Rule.KEY_MERCHANT_CONTAINS)));
-            if (merchant == null || needle == null || !merchant.contains(needle)) {
-                return false;
-            }
-        }
-
-        if (params.containsKey(Rule.KEY_MERCHANT_REGEX)) {
-            String pattern = asString(params.get(Rule.KEY_MERCHANT_REGEX));
-            if (merchant == null || pattern == null || pattern.isBlank()) {
-                return false;
-            }
-            try {
-                if (!Pattern.compile(pattern, Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE)
-                        .matcher(merchant)
-                        .find()) {
-                    return false;
-                }
-            } catch (PatternSyntaxException e) {
-                return false;
-            }
         }
 
         String operation = tx.getOperation();
 
         if (params.containsKey(Rule.KEY_OPERATION_CONTAINS)) {
-            String needle = merchantNormalizer.normalizeCore(asString(params.get(Rule.KEY_OPERATION_CONTAINS)));
+            String needle = textNormalizer.normalize(asString(params.get(Rule.KEY_OPERATION_CONTAINS)));
             if (operation == null || needle == null
-                    || !merchantNormalizer.normalizeCore(operation).contains(needle)) {
+                    || !textNormalizer.normalize(operation).contains(needle)) {
                 return false;
             }
         }
@@ -90,6 +65,32 @@ public class CategorizationEngine {
             try {
                 if (!Pattern.compile(pattern, Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE)
                         .matcher(operation)
+                        .find()) {
+                    return false;
+                }
+            } catch (PatternSyntaxException e) {
+                return false;
+            }
+        }
+
+        String purpose = tx.getPurpose();
+
+        if (params.containsKey(Rule.KEY_PURPOSE_CONTAINS)) {
+            String needle = textNormalizer.normalize(asString(params.get(Rule.KEY_PURPOSE_CONTAINS)));
+            if (purpose == null || needle == null
+                    || !textNormalizer.normalize(purpose).contains(needle)) {
+                return false;
+            }
+        }
+
+        if (params.containsKey(Rule.KEY_PURPOSE_REGEX)) {
+            String pattern = asString(params.get(Rule.KEY_PURPOSE_REGEX));
+            if (purpose == null || pattern == null || pattern.isBlank()) {
+                return false;
+            }
+            try {
+                if (!Pattern.compile(pattern, Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE)
+                        .matcher(purpose)
                         .find()) {
                     return false;
                 }
@@ -127,6 +128,23 @@ public class CategorizationEngine {
         }
 
         return true;
+    }
+
+    /**
+     * A rule must contain at least one recognised condition key. Rules whose
+     * params hold only unknown keys (e.g. legacy {@code merchant_contains})
+     * must never match — otherwise the empty AND over zero conditions would be
+     * vacuously true and the rule would match every transaction.
+     */
+    private static boolean hasKnownCondition(Map<String, Object> params) {
+        return params.containsKey(Rule.KEY_OPERATION_CONTAINS)
+                || params.containsKey(Rule.KEY_OPERATION_REGEX)
+                || params.containsKey(Rule.KEY_PURPOSE_CONTAINS)
+                || params.containsKey(Rule.KEY_PURPOSE_REGEX)
+                || params.containsKey(Rule.KEY_MIN)
+                || params.containsKey(Rule.KEY_MAX)
+                || params.containsKey(Rule.KEY_DAY_FROM)
+                || params.containsKey(Rule.KEY_DAY_TO);
     }
 
     private Map<String, Object> parseParams(String params) {

@@ -13,18 +13,18 @@ import org.hibernate.type.SqlTypes;
  * A categorization rule owned by a user (or auto-learned). Applied in priority
  * order (descending), first match wins. {@code params} is a flat JSON object
  * (jsonb) of optional condition keys; a rule matches iff EVERY present condition
- * matches (implicit AND). Supported keys: {@code merchant_contains},
- * {@code merchant_regex}, {@code operation_contains}, {@code operation_regex},
+ * matches (implicit AND). Supported keys: {@code operation_contains},
+ * {@code operation_regex}, {@code purpose_contains}, {@code purpose_regex},
  * {@code min}, {@code max}, {@code day_from}, {@code day_to}.
  */
 @Entity
 @Table(name = "rules")
 public class Rule {
 
-    public static final String KEY_MERCHANT_CONTAINS = "merchant_contains";
-    public static final String KEY_MERCHANT_REGEX = "merchant_regex";
     public static final String KEY_OPERATION_CONTAINS = "operation_contains";
     public static final String KEY_OPERATION_REGEX = "operation_regex";
+    public static final String KEY_PURPOSE_CONTAINS = "purpose_contains";
+    public static final String KEY_PURPOSE_REGEX = "purpose_regex";
     public static final String KEY_MIN = "min";
     public static final String KEY_MAX = "max";
     public static final String KEY_DAY_FROM = "day_from";

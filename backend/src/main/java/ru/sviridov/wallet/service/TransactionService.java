@@ -30,20 +30,15 @@ public class TransactionService {
     private final CategoryRepository categoryRepository;
     private final CategorizationEngine categorizationEngine;
     private final CardRepository cardRepository;
-    private final MerchantNormalizer merchantNormalizer;
-    private final DefaultDataSeeder defaultDataSeeder;
 
     public TransactionService(TransactionRepository transactionRepository, RuleRepository ruleRepository,
                               CategoryRepository categoryRepository, CategorizationEngine categorizationEngine,
-                              CardRepository cardRepository, MerchantNormalizer merchantNormalizer,
-                              DefaultDataSeeder defaultDataSeeder) {
+                              CardRepository cardRepository) {
         this.transactionRepository = transactionRepository;
         this.ruleRepository = ruleRepository;
         this.categoryRepository = categoryRepository;
         this.categorizationEngine = categorizationEngine;
         this.cardRepository = cardRepository;
-        this.merchantNormalizer = merchantNormalizer;
-        this.defaultDataSeeder = defaultDataSeeder;
     }
 
     @Transactional(readOnly = true)
@@ -78,13 +73,11 @@ public class TransactionService {
                     .orElseThrow(() -> new NotFoundException("Категория не найдена"));
         }
 
-        defaultDataSeeder.ensureDefaults(userId);
         List<Rule> rules = ruleRepository.findByUserIdOrderByPriorityDescIdAsc(userId);
 
         Transaction tx = new Transaction(userId, cardId, null, request.date(),
                 MANUAL_OPERATION, request.purpose(), request.amount(), request.type(), null);
         tx.setSource(request.source());
-        tx.setMerchantNormalized(merchantNormalizer.normalize(request.purpose()));
         tx.setCategoryId(request.categoryId() != null
                 ? request.categoryId()
                 : categorizationEngine.categorize(tx, rules));

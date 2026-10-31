@@ -44,8 +44,6 @@ class TransactionServiceTest {
     private CategoryRepository categoryRepository;
     @Mock
     private CardRepository cardRepository;
-    @Mock
-    private DefaultDataSeeder defaultDataSeeder;
 
     private TransactionService service;
 
@@ -53,10 +51,9 @@ class TransactionServiceTest {
     void setUp() {
         lenient().when(transactionRepository.save(any(Transaction.class))).thenAnswer(inv -> inv.getArgument(0));
         lenient().when(ruleRepository.findByUserIdOrderByPriorityDescIdAsc(anyLong())).thenReturn(List.of());
-        MerchantNormalizer normalizer = new MerchantNormalizer();
-        CategorizationEngine engine = new CategorizationEngine(new ObjectMapper(), normalizer);
+        CategorizationEngine engine = new CategorizationEngine(new ObjectMapper(), new TextNormalizer());
         service = new TransactionService(transactionRepository, ruleRepository, categoryRepository,
-                engine, cardRepository, normalizer, defaultDataSeeder);
+                engine, cardRepository);
     }
 
     private static TransactionRequest request(String source, Long cardId) {
@@ -164,8 +161,7 @@ class TransactionServiceTest {
         Long userId = 1L;
         Transaction tx = new Transaction(userId, 1L, null, LocalDate.of(2026, 10, 1),
                 "добавлено вручную", "Магазин", new BigDecimal("100.00"), "debit", null);
-        tx.setMerchantNormalized("магазин");
-        Rule rule = new Rule(userId, null, "{\"merchant_contains\":\"магазин\"}", 7L, 0, false);
+        Rule rule = new Rule(userId, null, "{\"purpose_contains\":\"магазин\"}", 7L, 0, false);
         when(ruleRepository.findByUserIdOrderByPriorityDescIdAsc(userId)).thenReturn(List.of(rule));
         when(transactionRepository.findActiveByUserId(userId)).thenReturn(List.of(tx));
 

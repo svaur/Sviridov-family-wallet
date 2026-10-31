@@ -4,6 +4,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import ru.sviridov.wallet.domain.Card;
 import ru.sviridov.wallet.domain.CardRepository;
+import ru.sviridov.wallet.domain.Category;
+import ru.sviridov.wallet.domain.CategoryRepository;
 import ru.sviridov.wallet.domain.Rule;
 import ru.sviridov.wallet.domain.RuleRepository;
 import ru.sviridov.wallet.domain.Statement;
@@ -18,13 +20,17 @@ import ru.sviridov.wallet.web.BadRequestException;
 import ru.sviridov.wallet.web.CardMismatchException;
 import ru.sviridov.wallet.web.NotFoundException;
 import ru.sviridov.wallet.web.dto.StatementImportResponse;
+import ru.sviridov.wallet.web.dto.StatementPreviewResponse;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 @Service
 public class StatementService {
@@ -33,33 +39,123 @@ public class StatementService {
     private final StatementRepository statementRepository;
     private final TransactionRepository transactionRepository;
     private final RuleRepository ruleRepository;
+    private final CategoryRepository categoryRepository;
     private final StatementParser parser;
-    private final MerchantNormalizer merchantNormalizer;
     private final CategorizationEngine categorizationEngine;
-    private final DefaultDataSeeder defaultDataSeeder;
+    private final StatementDraftStore draftStore;
 
     public StatementService(CardRepository cardRepository, StatementRepository statementRepository,
                             TransactionRepository transactionRepository, RuleRepository ruleRepository,
-                            StatementParser parser, MerchantNormalizer merchantNormalizer,
-                            CategorizationEngine categorizationEngine, DefaultDataSeeder defaultDataSeeder) {
+                            CategoryRepository categoryRepository, StatementParser parser,
+                            CategorizationEngine categorizationEngine, StatementDraftStore draftStore) {
         this.cardRepository = cardRepository;
         this.statementRepository = statementRepository;
         this.transactionRepository = transactionRepository;
         this.ruleRepository = ruleRepository;
+        this.categoryRepository = categoryRepository;
         this.parser = parser;
-        this.merchantNormalizer = merchantNormalizer;
         this.categorizationEngine = categorizationEngine;
-        this.defaultDataSeeder = defaultDataSeeder;
+        this.draftStore = draftStore;
     }
 
     /**
-     * Parses and imports a statement PDF for a card. Persists the import fact
-     * (statements row) plus the non-duplicate transactions; the PDF bytes are
-     * never stored. Normalises the merchant and auto-categorises each row.
-     * Returns counts, warnings and unrecognised rows.
+     * Step 1 of the upload wizard: parse, validate and categorise the PDF
+     * without persisting anything, and keep the result as a draft for the next
+     * steps. Returns the preview keyed by {@code draftId}.
      */
+    public StatementPreviewResponse preview(Long userId, Long cardId, byte[] pdfBytes) {
+        StatementDraft draft = prepare(userId, cardId, pdfBytes);
+        String draftId = draftStore.put(draft);
+        return toPreview(draftId, draft, countDuplicates(draft.transactions()));
+    }
+
+    /** Step 2: re-run categorisation over the draft using the current rule set. */
+    public StatementPreviewResponse recategorize(Long userId, Long cardId, String draftId) {
+        StatementDraft draft = getDraft(userId, cardId, draftId);
+        List<Rule> rules = ruleRepository.findByUserIdOrderByPriorityDescIdAsc(userId);
+        for (Transaction tx : draft.transactions()) {
+            if (!tx.isCategoryManual()) {
+                tx.setCategoryId(categorizationEngine.categorize(tx, rules));
+            }
+        }
+        return toPreview(draftId, draft, countDuplicates(draft.transactions()));
+    }
+
+    /** Step 2: remove one transaction from the draft (it will not be imported). */
+    public StatementPreviewResponse removeTransaction(Long userId, Long cardId, String draftId, int rowNumber) {
+        StatementDraft draft = getDraft(userId, cardId, draftId);
+        List<Transaction> kept = draft.transactions().stream()
+                .filter(tx -> tx.getRowNumber() == null || tx.getRowNumber() != rowNumber)
+                .collect(Collectors.toCollection(ArrayList::new));
+        StatementDraft updated = new StatementDraft(draft.userId(), draft.cardId(), draft.parserVersion(),
+                draft.periodFrom(), draft.periodTo(), draft.cardNumber(), draft.contract(), draft.account(),
+                draft.rowCountRaw(), kept.size(), kept, draft.warnings(), draft.unrecognizedRows(), draft.createdAt());
+        draftStore.replace(draftId, updated);
+        return toPreview(draftId, updated, countDuplicates(kept));
+    }
+
+    /** Step 2: assign a category manually to one transaction in the draft. */
+    public StatementPreviewResponse assignDraftCategory(Long userId, Long cardId, String draftId, int rowNumber,
+                                                        Long categoryId) {
+        StatementDraft draft = getDraft(userId, cardId, draftId);
+        categoryRepository.findByIdAndUserId(categoryId, userId)
+                .orElseThrow(() -> new NotFoundException("Категория не найдена"));
+        Transaction tx = draft.transactions().stream()
+                .filter(t -> t.getRowNumber() != null && t.getRowNumber() == rowNumber)
+                .findFirst()
+                .orElseThrow(() -> new NotFoundException("Строка не найдена"));
+        tx.setCategoryId(categoryId);
+        tx.setCategoryManual(true);
+        return toPreview(draftId, draft, countDuplicates(draft.transactions()));
+    }
+
+    /** Step 3: dedup and persist the draft, then discard it. */
     @Transactional
-    public StatementImportResponse importStatement(Long userId, Long cardId, byte[] pdfBytes) {
+    public StatementImportResponse confirm(Long userId, Long cardId, String draftId) {
+        StatementDraft draft = getDraft(userId, cardId, draftId);
+
+        List<String> fingerprints = draft.transactions().stream()
+                .map(Transaction::getFingerprint)
+                .toList();
+        Set<String> existing = fingerprints.isEmpty()
+                ? Set.of()
+                : transactionRepository.findExistingFingerprints(fingerprints);
+
+        int skippedDuplicates = 0;
+        List<Transaction> toSave = new ArrayList<>();
+        for (Transaction tx : draft.transactions()) {
+            if (existing.contains(tx.getFingerprint())) {
+                skippedDuplicates++;
+                continue;
+            }
+            toSave.add(tx);
+        }
+
+        String status = draft.unrecognizedRows().isEmpty() ? "OK" : "PARTIAL";
+
+        Statement statement = new Statement(draft.cardId(), draft.periodFrom(), draft.periodTo(),
+                draft.parserVersion(), status, draft.validCount(), draft.rowCountRaw(),
+                draft.cardNumber(), draft.contract(), draft.account());
+        statement = statementRepository.save(statement);
+
+        for (Transaction t : toSave) {
+            t.setStatementId(statement.getId());
+        }
+        transactionRepository.saveAll(toSave);
+        draftStore.remove(draftId);
+
+        return new StatementImportResponse(statement.getId(), status, draft.rowCountRaw(),
+                toSave.size(), skippedDuplicates, draft.warnings(), draft.unrecognizedRows());
+    }
+
+    @Transactional(readOnly = true)
+    public List<Statement> listForCard(Long userId, Long cardId) {
+        cardRepository.findByIdAndUserId(cardId, userId)
+                .orElseThrow(() -> new NotFoundException("Карта не найдена"));
+        return statementRepository.findByCardIdOrderByIdDesc(cardId);
+    }
+
+    private StatementDraft prepare(Long userId, Long cardId, byte[] pdfBytes) {
         Card card = cardRepository.findByIdAndUserId(cardId, userId)
                 .orElseThrow(() -> new NotFoundException("Карта не найдена"));
 
@@ -108,59 +204,53 @@ public class StatementService {
             warnings.add("Период выписки пересекается с уже загруженной выпиской");
         }
 
-        // Dedup by fingerprint; soft-deleted rows keep their fingerprint so they
-        // are not restored (tombstone).
-        List<String> fingerprints = validRows.stream()
-                .map(r -> fingerprint(userId, cardId, r))
-                .toList();
-        Set<String> existing = fingerprints.isEmpty()
-                ? Set.of()
-                : transactionRepository.findExistingFingerprints(fingerprints);
-
-        // Seed default categories/rules on the very first import, then classify.
-        defaultDataSeeder.ensureDefaults(userId);
+        // Classify rows with the current rule set.
         List<Rule> rules = ruleRepository.findByUserIdOrderByPriorityDescIdAsc(userId);
 
-        int skippedDuplicates = 0;
-        List<Transaction> toSave = new ArrayList<>();
+        List<Transaction> transactions = new ArrayList<>();
         for (ParsedRow row : validRows) {
             String fp = fingerprint(userId, cardId, row);
-            if (existing.contains(fp)) {
-                skippedDuplicates++;
-                continue;
-            }
             Transaction tx = new Transaction(userId, cardId, row.rowNumber(), row.date(), row.operation(),
                     row.purpose(), row.amount(), row.type(), fp);
-            tx.setMerchantNormalized(merchantNormalizer.normalize(merchantSource(row)));
             tx.setCategoryId(categorizationEngine.categorize(tx, rules));
-            toSave.add(tx);
+            transactions.add(tx);
         }
 
-        String status = unrecognized.isEmpty() ? "OK" : "PARTIAL";
+        return new StatementDraft(userId, cardId, parser.version(), parsed.periodFrom(), parsed.periodTo(),
+                parsed.cardNumber(), parsed.contract(), parsed.account(), parsed.rowCountRaw(),
+                validRows.size(), transactions, warnings, unrecognized, Instant.now());
+    }
 
-        Statement statement = new Statement(cardId, parsed.periodFrom(), parsed.periodTo(), parser.version(),
-                status, validRows.size(), parsed.rowCountRaw(), parsed.cardNumber(), parsed.contract(), parsed.account());
-        statement = statementRepository.save(statement);
-
-        for (Transaction t : toSave) {
-            t.setStatementId(statement.getId());
+    private StatementDraft getDraft(Long userId, Long cardId, String draftId) {
+        StatementDraft draft = draftStore.get(draftId);
+        if (draft == null || !draft.userId().equals(userId) || !draft.cardId().equals(cardId)) {
+            throw new NotFoundException("Черновик не найден или устарел");
         }
-        transactionRepository.saveAll(toSave);
-
-        return new StatementImportResponse(statement.getId(), status, parsed.rowCountRaw(),
-                toSave.size(), skippedDuplicates, warnings, unrecognized);
+        return draft;
     }
 
-    @Transactional(readOnly = true)
-    public List<Statement> listForCard(Long userId, Long cardId) {
-        cardRepository.findByIdAndUserId(cardId, userId)
-                .orElseThrow(() -> new NotFoundException("Карта не найдена"));
-        return statementRepository.findByCardIdOrderByIdDesc(cardId);
+    private int countDuplicates(List<Transaction> transactions) {
+        if (transactions.isEmpty()) {
+            return 0;
+        }
+        List<String> fingerprints = transactions.stream().map(Transaction::getFingerprint).toList();
+        Set<String> existing = transactionRepository.findExistingFingerprints(fingerprints);
+        return (int) transactions.stream().filter(t -> existing.contains(t.getFingerprint())).count();
     }
 
-    /** Counterparty name lives in the payment purpose; fall back to the operation. */
-    private static String merchantSource(ParsedRow row) {
-        return row.purpose() != null && !row.purpose().isBlank() ? row.purpose() : row.operation();
+    private StatementPreviewResponse toPreview(String draftId, StatementDraft draft, int skippedDuplicates) {
+        Map<Long, String> categoryNames = categoryRepository.findByUserIdOrderByNameAsc(draft.userId()).stream()
+                .collect(Collectors.toMap(Category::getId, Category::getName));
+        List<StatementPreviewResponse.PreviewTransaction> previewTxns = draft.transactions().stream()
+                .map(tx -> new StatementPreviewResponse.PreviewTransaction(
+                        tx.getRowNumber() == null ? 0 : tx.getRowNumber(),
+                        tx.getDate(), tx.getOperation(), tx.getPurpose(), tx.getAmount(), tx.getType(),
+                        tx.getCategoryId(),
+                        tx.getCategoryId() == null ? null : categoryNames.get(tx.getCategoryId())))
+                .toList();
+        return new StatementPreviewResponse(draftId, draft.periodFrom(), draft.periodTo(),
+                draft.cardNumber(), draft.contract(), draft.account(), draft.rowCountRaw(),
+                draft.validCount(), skippedDuplicates, draft.warnings(), draft.unrecognizedRows(), previewTxns);
     }
 
     private static String last4(String cardNumber) {

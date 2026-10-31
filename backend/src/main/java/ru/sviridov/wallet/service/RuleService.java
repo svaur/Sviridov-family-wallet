@@ -23,35 +23,32 @@ import java.util.regex.PatternSyntaxException;
 @Service
 public class RuleService {
 
-    /** User-authored rules override built-in defaults (which use priority 0). */
+    /** User-authored rules default to a priority above lower-priority rules. */
     private static final int DEFAULT_USER_PRIORITY = 100;
 
     private static final Set<String> KNOWN_KEYS = Set.of(
-            Rule.KEY_MERCHANT_CONTAINS, Rule.KEY_MERCHANT_REGEX,
             Rule.KEY_OPERATION_CONTAINS, Rule.KEY_OPERATION_REGEX,
+            Rule.KEY_PURPOSE_CONTAINS, Rule.KEY_PURPOSE_REGEX,
             Rule.KEY_MIN, Rule.KEY_MAX, Rule.KEY_DAY_FROM, Rule.KEY_DAY_TO);
 
     private final RuleRepository ruleRepository;
     private final CategoryRepository categoryRepository;
-    private final DefaultDataSeeder defaultDataSeeder;
     private final TransactionService transactionService;
     private final ObjectMapper objectMapper;
-    private final MerchantNormalizer merchantNormalizer;
+    private final TextNormalizer textNormalizer;
 
     public RuleService(RuleRepository ruleRepository, CategoryRepository categoryRepository,
-                       DefaultDataSeeder defaultDataSeeder, TransactionService transactionService,
-                       ObjectMapper objectMapper, MerchantNormalizer merchantNormalizer) {
+                       TransactionService transactionService,
+                       ObjectMapper objectMapper, TextNormalizer textNormalizer) {
         this.ruleRepository = ruleRepository;
         this.categoryRepository = categoryRepository;
-        this.defaultDataSeeder = defaultDataSeeder;
         this.transactionService = transactionService;
         this.objectMapper = objectMapper;
-        this.merchantNormalizer = merchantNormalizer;
+        this.textNormalizer = textNormalizer;
     }
 
     @Transactional(readOnly = true)
     public List<RuleResponse> list(Long userId) {
-        defaultDataSeeder.ensureDefaults(userId);
         return ruleRepository.findByUserIdOrderByPriorityDescIdAsc(userId).stream()
                 .map(rule -> RuleResponse.from(rule, objectMapper))
                 .toList();
@@ -59,7 +56,6 @@ public class RuleService {
 
     @Transactional
     public RuleResponse create(Long userId, RuleRequest request) {
-        defaultDataSeeder.ensureDefaults(userId);
         validateCategory(userId, request.categoryId());
         String params = normalizeParams(request);
         int priority = request.priority() == null ? DEFAULT_USER_PRIORITY : request.priority();
@@ -110,33 +106,12 @@ public class RuleService {
 
         Map<String, Object> out = new LinkedHashMap<>();
 
-        if (in.containsKey(Rule.KEY_MERCHANT_CONTAINS)) {
-            String value = optionalString(in, Rule.KEY_MERCHANT_CONTAINS);
-            if (value == null) {
-                throw new BadRequestException("Условие 'merchant_contains' не может быть пустым");
-            }
-            out.put(Rule.KEY_MERCHANT_CONTAINS, merchantNormalizer.normalizeCore(value));
-        }
-
-        if (in.containsKey(Rule.KEY_MERCHANT_REGEX)) {
-            String pattern = optionalString(in, Rule.KEY_MERCHANT_REGEX);
-            if (pattern == null) {
-                throw new BadRequestException("Условие 'merchant_regex' не может быть пустым");
-            }
-            try {
-                Pattern.compile(pattern);
-            } catch (PatternSyntaxException e) {
-                throw new BadRequestException("Некорректное регулярное выражение: " + e.getMessage());
-            }
-            out.put(Rule.KEY_MERCHANT_REGEX, pattern);
-        }
-
         if (in.containsKey(Rule.KEY_OPERATION_CONTAINS)) {
             String value = optionalString(in, Rule.KEY_OPERATION_CONTAINS);
             if (value == null) {
                 throw new BadRequestException("Условие 'operation_contains' не может быть пустым");
             }
-            out.put(Rule.KEY_OPERATION_CONTAINS, merchantNormalizer.normalizeCore(value));
+            out.put(Rule.KEY_OPERATION_CONTAINS, textNormalizer.normalize(value));
         }
 
         if (in.containsKey(Rule.KEY_OPERATION_REGEX)) {
@@ -150,6 +125,27 @@ public class RuleService {
                 throw new BadRequestException("Некорректное регулярное выражение: " + e.getMessage());
             }
             out.put(Rule.KEY_OPERATION_REGEX, pattern);
+        }
+
+        if (in.containsKey(Rule.KEY_PURPOSE_CONTAINS)) {
+            String value = optionalString(in, Rule.KEY_PURPOSE_CONTAINS);
+            if (value == null) {
+                throw new BadRequestException("Условие 'purpose_contains' не может быть пустым");
+            }
+            out.put(Rule.KEY_PURPOSE_CONTAINS, textNormalizer.normalize(value));
+        }
+
+        if (in.containsKey(Rule.KEY_PURPOSE_REGEX)) {
+            String pattern = optionalString(in, Rule.KEY_PURPOSE_REGEX);
+            if (pattern == null) {
+                throw new BadRequestException("Условие 'purpose_regex' не может быть пустым");
+            }
+            try {
+                Pattern.compile(pattern);
+            } catch (PatternSyntaxException e) {
+                throw new BadRequestException("Некорректное регулярное выражение: " + e.getMessage());
+            }
+            out.put(Rule.KEY_PURPOSE_REGEX, pattern);
         }
 
         BigDecimal min = null;

@@ -15,10 +15,14 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
 public class AnalyticsService {
+
+    /** Sentinel id used to exclude the "uncategorized" bucket (categoryId is null). */
+    public static final long UNCATEGORIZED = 0L;
 
     private final TransactionRepository transactionRepository;
     private final CategoryRepository categoryRepository;
@@ -29,10 +33,11 @@ public class AnalyticsService {
     }
 
     @Transactional(readOnly = true)
-    public AnalyticsResponse analytics(Long userId, LocalDate from, LocalDate to) {
+    public AnalyticsResponse analytics(Long userId, LocalDate from, LocalDate to, Set<Long> excludeCategoryIds) {
         List<Transaction> txs = transactionRepository.findActiveByUserId(userId).stream()
                 .filter(t -> !t.getDate().isBefore(from) && !t.getDate().isAfter(to))
                 .filter(t -> !t.isTransfer() && !t.isExcluded())
+                .filter(t -> !isExcluded(t.getCategoryId(), excludeCategoryIds))
                 .toList();
 
         BigDecimal income = sum(txs, "credit");
@@ -45,6 +50,16 @@ public class AnalyticsService {
                 income, expense, income.subtract(expense),
                 monthly(txs, from, to),
                 categories(txs, categoryNames));
+    }
+
+    /** A transaction is excluded when its category (or the uncategorized bucket) is in the set. */
+    private static boolean isExcluded(Long categoryId, Set<Long> excludeCategoryIds) {
+        if (excludeCategoryIds == null || excludeCategoryIds.isEmpty()) {
+            return false;
+        }
+        return categoryId == null
+                ? excludeCategoryIds.contains(UNCATEGORIZED)
+                : excludeCategoryIds.contains(categoryId);
     }
 
     private static BigDecimal sum(List<Transaction> txs, String type) {

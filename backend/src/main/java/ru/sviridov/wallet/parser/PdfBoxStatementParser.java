@@ -66,9 +66,9 @@ public class PdfBoxStatementParser implements StatementParser {
             Float expenseX = null;
             Float incomeX = null;
             for (Token t : tokens) {
-                if ("Расход".equals(t.text())) {
+                if (expenseX == null && "Расход".equals(t.text())) {
                     expenseX = t.x();
-                } else if ("Приход".equals(t.text())) {
+                } else if (incomeX == null && "Приход".equals(t.text())) {
                     incomeX = t.x();
                 }
             }
@@ -190,23 +190,35 @@ public class PdfBoxStatementParser implements StatementParser {
         return collector.tokens;
     }
 
+    /**
+     * Groups tokens into visual lines. Tokens are grouped per page first: a
+     * multi-page statement restarts its vertical coordinate system on every
+     * page, so two unrelated rows can share the same {@code y} and must not be
+     * merged into one line.
+     */
     private static List<List<Token>> groupByY(List<Token> tokens) {
         List<Token> sorted = new ArrayList<>(tokens);
-        sorted.sort(Comparator.comparingDouble(Token::y).thenComparingDouble(Token::x));
+        sorted.sort(Comparator.comparingInt(Token::page)
+                .thenComparingDouble(Token::y)
+                .thenComparingDouble(Token::x));
         List<List<Token>> lines = new ArrayList<>();
         List<Token> current = new ArrayList<>();
+        int currentPage = -1;
         float currentY = 0f;
         for (Token t : sorted) {
-            if (current.isEmpty() || Math.abs(t.y() - currentY) <= LINE_TOLERANCE) {
-                if (current.isEmpty()) {
-                    currentY = t.y();
-                }
+            boolean sameLine = !current.isEmpty()
+                    && t.page() == currentPage
+                    && Math.abs(t.y() - currentY) <= LINE_TOLERANCE;
+            if (sameLine) {
                 current.add(t);
             } else {
-                lines.add(current);
+                if (!current.isEmpty()) {
+                    lines.add(current);
+                }
                 current = new ArrayList<>();
                 current.add(t);
                 currentY = t.y();
+                currentPage = t.page();
             }
         }
         if (!current.isEmpty()) {
@@ -234,7 +246,7 @@ public class PdfBoxStatementParser implements StatementParser {
         }
     }
 
-    private record Token(String text, float x, float y) {
+    private record Token(String text, float x, float y, int page) {
     }
 
     private static final class TokenCollector extends PDFTextStripper {
@@ -247,6 +259,7 @@ public class PdfBoxStatementParser implements StatementParser {
                 return;
             }
             float y = textPositions.get(0).getYDirAdj();
+            int page = getCurrentPageNo();
             int n = Math.min(text.length(), textPositions.size());
             StringBuilder sb = new StringBuilder();
             Float x = null;
@@ -255,7 +268,7 @@ public class PdfBoxStatementParser implements StatementParser {
                 TextPosition tp = textPositions.get(i);
                 if (Character.isWhitespace(c)) {
                     if (sb.length() > 0 && x != null) {
-                        tokens.add(new Token(sb.toString(), x, y));
+                        tokens.add(new Token(sb.toString(), x, y, page));
                     }
                     sb.setLength(0);
                     x = null;
@@ -267,7 +280,7 @@ public class PdfBoxStatementParser implements StatementParser {
                 }
             }
             if (sb.length() > 0 && x != null) {
-                tokens.add(new Token(sb.toString(), x, y));
+                tokens.add(new Token(sb.toString(), x, y, page));
             }
             super.writeString(text, textPositions);
         }

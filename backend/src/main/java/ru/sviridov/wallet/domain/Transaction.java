@@ -19,9 +19,8 @@ import java.time.LocalDate;
  * ({@link #SOURCE_CARD}, {@link #SOURCE_CASH}, {@link #SOURCE_OTHER}); the card
  * is optional (null for cash/other). {@code fingerprint} is the SHA-256 dedup
  * key for statement rows; rows are soft-deleted via {@code deletedAt} (tombstone).
- * {@code merchantNormalized} and {@code categoryId} are filled by the
- * normalizer/categorizer. {@code categoryManual} marks a category assigned by
- * hand, which rules must never overwrite.
+ * {@code categoryId} is filled by the categorizer. {@code categoryManual} marks
+ * a category assigned by hand, which rules must never overwrite.
  */
 @Entity
 @Table(name = "transactions")
@@ -56,9 +55,6 @@ public class Transaction {
 
     @Column(columnDefinition = "text")
     private String purpose;
-
-    @Column(name = "merchant_normalized", length = 255)
-    private String merchantNormalized;
 
     @Column(nullable = false, precision = 15, scale = 2)
     private BigDecimal amount;
@@ -148,14 +144,6 @@ public class Transaction {
 
     public String getPurpose() {
         return purpose;
-    }
-
-    public String getMerchantNormalized() {
-        return merchantNormalized;
-    }
-
-    public void setMerchantNormalized(String merchantNormalized) {
-        this.merchantNormalized = merchantNormalized;
     }
 
     public BigDecimal getAmount() {

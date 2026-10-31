@@ -12,25 +12,20 @@ import java.util.List;
 public class CategoryService {
 
     private final CategoryRepository categoryRepository;
-    private final DefaultDataSeeder defaultDataSeeder;
     private final TransactionService transactionService;
 
-    public CategoryService(CategoryRepository categoryRepository, DefaultDataSeeder defaultDataSeeder,
-                           TransactionService transactionService) {
+    public CategoryService(CategoryRepository categoryRepository, TransactionService transactionService) {
         this.categoryRepository = categoryRepository;
-        this.defaultDataSeeder = defaultDataSeeder;
         this.transactionService = transactionService;
     }
 
     @Transactional(readOnly = true)
     public List<Category> list(Long userId) {
-        defaultDataSeeder.ensureDefaults(userId);
         return categoryRepository.findByUserIdOrderByNameAsc(userId);
     }
 
     @Transactional
     public Category create(Long userId, String name, Long parentId) {
-        defaultDataSeeder.ensureDefaults(userId);
         validateParent(userId, parentId);
         return categoryRepository.save(new Category(userId, parentId, name));
     }

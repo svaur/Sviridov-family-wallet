@@ -22,6 +22,8 @@ import java.util.stream.Collectors;
 @Service
 public class TransactionService {
 
+    private static final String MANUAL_OPERATION = "добавлено вручную";
+
     private final TransactionRepository transactionRepository;
     private final RuleRepository ruleRepository;
     private final CategoryRepository categoryRepository;
@@ -79,7 +81,7 @@ public class TransactionService {
         List<Rule> rules = ruleRepository.findByUserIdOrderByPriorityDescIdAsc(userId);
 
         Transaction tx = new Transaction(userId, cardId, null, request.date(),
-                null, request.purpose(), request.amount(), request.type(), null);
+                MANUAL_OPERATION, request.purpose(), request.amount(), request.type(), null);
         tx.setSource(request.source());
         tx.setMerchantNormalized(merchantNormalizer.normalize(request.purpose()));
         tx.setCategoryId(request.categoryId() != null

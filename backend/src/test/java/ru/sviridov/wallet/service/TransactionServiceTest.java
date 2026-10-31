@@ -77,6 +77,7 @@ class TransactionServiceTest {
         verify(transactionRepository).save(captor.capture());
         assertThat(captor.getValue().getSource()).isEqualTo("card");
         assertThat(captor.getValue().getCardId()).isEqualTo(cardId);
+        assertThat(captor.getValue().getOperation()).isEqualTo("добавлено вручную");
     }
 
     @Test

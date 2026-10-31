@@ -24,8 +24,14 @@ class CategorizationEngineTest {
     }
 
     @Test
+    void merchantContainsIsCaseInsensitive() {
+        Rule rule = rule("{\"merchant_contains\":\"KORMA\"}", 11L);
+        assertThat(engine.categorize(tx("mir korma"), List.of(rule))).isEqualTo(11L);
+    }
+
+    @Test
     void merchantRegexMatchesCaseInsensitive() {
-        Rule rule = rule("{\"merchant_regex\":\"korma\"}", 20L);
+        Rule rule = rule("{\"merchant_regex\":\"KORMA\"}", 20L);
         assertThat(engine.categorize(tx("MIR KORMA"), List.of(rule))).isEqualTo(20L);
     }
 

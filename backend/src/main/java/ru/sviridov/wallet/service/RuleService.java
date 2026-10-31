@@ -35,15 +35,17 @@ public class RuleService {
     private final DefaultDataSeeder defaultDataSeeder;
     private final TransactionService transactionService;
     private final ObjectMapper objectMapper;
+    private final MerchantNormalizer merchantNormalizer;
 
     public RuleService(RuleRepository ruleRepository, CategoryRepository categoryRepository,
                        DefaultDataSeeder defaultDataSeeder, TransactionService transactionService,
-                       ObjectMapper objectMapper) {
+                       ObjectMapper objectMapper, MerchantNormalizer merchantNormalizer) {
         this.ruleRepository = ruleRepository;
         this.categoryRepository = categoryRepository;
         this.defaultDataSeeder = defaultDataSeeder;
         this.transactionService = transactionService;
         this.objectMapper = objectMapper;
+        this.merchantNormalizer = merchantNormalizer;
     }
 
     @Transactional(readOnly = true)
@@ -112,7 +114,7 @@ public class RuleService {
             if (value == null) {
                 throw new BadRequestException("Условие 'merchant_contains' не может быть пустым");
             }
-            out.put(Rule.KEY_MERCHANT_CONTAINS, value);
+            out.put(Rule.KEY_MERCHANT_CONTAINS, merchantNormalizer.normalizeCore(value));
         }
 
         if (in.containsKey(Rule.KEY_MERCHANT_REGEX)) {

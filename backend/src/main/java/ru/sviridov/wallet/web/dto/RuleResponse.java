@@ -6,7 +6,7 @@ import ru.sviridov.wallet.domain.Rule;
 
 import java.util.Map;
 
-public record RuleResponse(Long id, Map<String, Object> params, Long categoryId,
+public record RuleResponse(Long id, String name, Map<String, Object> params, Long categoryId,
                            int priority, boolean autoLearned) {
 
     public static RuleResponse from(Rule rule, ObjectMapper objectMapper) {
@@ -19,7 +19,7 @@ public record RuleResponse(Long id, Map<String, Object> params, Long categoryId,
                 params = Map.of();
             }
         }
-        return new RuleResponse(rule.getId(), params, rule.getCategoryId(),
+        return new RuleResponse(rule.getId(), rule.getName(), params, rule.getCategoryId(),
                 rule.getPriority(), rule.isAutoLearned());
     }
 }

@@ -35,6 +35,10 @@ public class Rule {
     @Column(name = "user_id", nullable = false)
     private Long userId;
 
+    /** Optional human-readable rule name; blank is stored as null. */
+    @Column(length = 120)
+    private String name;
+
     /** Flat JSON object of optional conditions; stored as jsonb. */
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(nullable = false, columnDefinition = "jsonb")
@@ -52,8 +56,9 @@ public class Rule {
     protected Rule() {
     }
 
-    public Rule(Long userId, String params, Long categoryId, Integer priority, boolean autoLearned) {
+    public Rule(Long userId, String name, String params, Long categoryId, Integer priority, boolean autoLearned) {
         this.userId = userId;
+        this.name = name;
         this.params = params;
         this.categoryId = categoryId;
         this.priority = priority == null ? 0 : priority;
@@ -66,6 +71,14 @@ public class Rule {
 
     public Long getUserId() {
         return userId;
+    }
+
+    public String getName() {
+        return name;
+    }
+
+    public void setName(String name) {
+        this.name = name;
     }
 
     public String getParams() {

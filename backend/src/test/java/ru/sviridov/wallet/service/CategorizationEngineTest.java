@@ -86,7 +86,7 @@ class CategorizationEngineTest {
     }
 
     private Rule rule(String params, Long categoryId) {
-        return new Rule(1L, params, categoryId, 0, false);
+        return new Rule(1L, null, params, categoryId, 0, false);
     }
 
     private Transaction tx(String merchant) {

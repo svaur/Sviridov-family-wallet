@@ -60,7 +60,8 @@ public class RuleService {
         validateCategory(userId, request.categoryId());
         String params = normalizeParams(request);
         int priority = request.priority() == null ? DEFAULT_USER_PRIORITY : request.priority();
-        Rule rule = ruleRepository.save(new Rule(userId, params, request.categoryId(), priority, false));
+        Rule rule = ruleRepository.save(new Rule(userId, normalizeName(request.name()), params,
+                request.categoryId(), priority, false));
         transactionService.reCategorizeAll(userId);
         return RuleResponse.from(rule, objectMapper);
     }
@@ -71,6 +72,7 @@ public class RuleService {
                 .orElseThrow(() -> new NotFoundException("Правило не найдено"));
         validateCategory(userId, request.categoryId());
         String params = normalizeParams(request);
+        rule.setName(normalizeName(request.name()));
         rule.setParams(params);
         rule.setCategoryId(request.categoryId());
         rule.setPriority(request.priority() == null ? DEFAULT_USER_PRIORITY : request.priority());
@@ -202,6 +204,15 @@ public class RuleService {
         } catch (NumberFormatException | ArithmeticException e) {
             throw new BadRequestException("Некорректное целое число в '" + key + "'");
         }
+    }
+
+    /** Trims the name; blank becomes null so the UI can fall back to the params label. */
+    private String normalizeName(String name) {
+        if (name == null) {
+            return null;
+        }
+        String trimmed = name.trim();
+        return trimmed.isEmpty() ? null : trimmed;
     }
 
     private String json(Map<String, Object> params) {

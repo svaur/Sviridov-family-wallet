@@ -121,6 +121,47 @@ public class TransactionService {
     }
 
     /**
+     * Marks a transaction as an internal transfer and, heuristically, also
+     * marks any opposite-side transaction with the same amount and date (the
+     * matching debit/credit pair), so analytics excludes both.
+     */
+    @Transactional
+    public TransactionResponse markTransfer(Long userId, Long id) {
+        Transaction tx = transactionRepository.findByIdAndUserId(id, userId)
+                .orElseThrow(() -> new NotFoundException("Операция не найдена"));
+        if (tx.getDeletedAt() != null) {
+            throw new NotFoundException("Операция не найдена");
+        }
+        tx.setIsTransfer(true);
+        tx = transactionRepository.save(tx);
+
+        for (Transaction other : transactionRepository.findActiveByUserId(userId)) {
+            if (other == tx || (other.getId() != null && other.getId().equals(tx.getId()))) {
+                continue;
+            }
+            if (other.isTransfer()) {
+                continue;
+            }
+            if (!other.getDate().equals(tx.getDate())) {
+                continue;
+            }
+            if (other.getAmount().compareTo(tx.getAmount()) != 0) {
+                continue;
+            }
+            if (other.getType().equals(tx.getType())) {
+                continue;
+            }
+            other.setIsTransfer(true);
+            transactionRepository.save(other);
+        }
+
+        String categoryName = tx.getCategoryId() == null
+                ? null
+                : categoryRepository.findById(tx.getCategoryId()).map(Category::getName).orElse(null);
+        return TransactionResponse.from(tx, categoryName);
+    }
+
+    /**
      * Re-runs the full rule set (priority order) over the user's active
      * transactions and updates category assignments in place. Called after any
      * rule or category change. Transactions with a manually assigned category

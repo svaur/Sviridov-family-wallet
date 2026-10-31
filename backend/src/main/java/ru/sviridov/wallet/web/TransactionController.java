@@ -54,4 +54,11 @@ public class TransactionController {
         TransactionResponse updated = transactionService.assignCategory(user.getId(), id, request.categoryId());
         return ResponseEntity.ok(updated);
     }
+
+    @PostMapping("/{id}/transfer")
+    public ResponseEntity<TransactionResponse> markTransfer(@AuthenticationPrincipal AppUser user,
+                                                            @PathVariable Long id) {
+        TransactionResponse updated = transactionService.markTransfer(user.getId(), id);
+        return ResponseEntity.ok(updated);
+    }
 }

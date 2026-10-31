@@ -41,11 +41,13 @@ public class StatementService {
     private final StatementParser parser;
     private final CategorizationEngine categorizationEngine;
     private final StatementDraftStore draftStore;
+    private final StatementGapService statementGapService;
 
     public StatementService(CardService cardService, StatementRepository statementRepository,
                             TransactionRepository transactionRepository, RuleRepository ruleRepository,
                             CategoryRepository categoryRepository, StatementParser parser,
-                            CategorizationEngine categorizationEngine, StatementDraftStore draftStore) {
+                            CategorizationEngine categorizationEngine, StatementDraftStore draftStore,
+                            StatementGapService statementGapService) {
         this.cardService = cardService;
         this.statementRepository = statementRepository;
         this.transactionRepository = transactionRepository;
@@ -54,6 +56,7 @@ public class StatementService {
         this.parser = parser;
         this.categorizationEngine = categorizationEngine;
         this.draftStore = draftStore;
+        this.statementGapService = statementGapService;
     }
 
     /**
@@ -140,6 +143,7 @@ public class StatementService {
             t.setStatementId(statement.getId());
         }
         transactionRepository.saveAll(toSave);
+        statementGapService.detectGaps(draft.cardId());
         draftStore.remove(draftId);
 
         return new StatementImportResponse(statement.getId(), status, draft.rowCountRaw(),

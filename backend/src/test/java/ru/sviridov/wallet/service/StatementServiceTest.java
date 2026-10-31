@@ -53,6 +53,8 @@ class StatementServiceTest {
     private CategoryRepository categoryRepository;
     @Mock
     private StatementParser parser;
+    @Mock
+    private StatementGapService statementGapService;
 
     private StatementService service;
 
@@ -65,7 +67,7 @@ class StatementServiceTest {
                 .thenAnswer(inv -> new Card(inv.getArgument(0), inv.getArgument(1), "Main"));
         CategorizationEngine engine = new CategorizationEngine(new ObjectMapper(), new TextNormalizer());
         service = new StatementService(cardService, statementRepository, transactionRepository,
-                ruleRepository, categoryRepository, parser, engine, new StatementDraftStore());
+                ruleRepository, categoryRepository, parser, engine, new StatementDraftStore(), statementGapService);
     }
 
     private static ParsedStatement statementOf(ParsedRow... rows) {

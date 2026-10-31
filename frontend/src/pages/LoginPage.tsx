@@ -32,6 +32,10 @@ export function LoginPage() {
   return (
     <div className="page page-centered">
       <form className="card card-narrow" onSubmit={onSubmit}>
+        <div className="login-brand">
+          <div className="login-mark">₽</div>
+          <b>Sviridov · Семейный кошелёк</b>
+        </div>
         <h1>Вход</h1>
         <label className="field">
           <span>Логин</span>

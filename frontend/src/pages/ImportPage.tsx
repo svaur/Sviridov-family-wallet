@@ -1,7 +1,6 @@
 import { Fragment, useEffect, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { api, HttpError } from '../api'
-import { useAuth } from '../auth/AuthContext'
 import { RuleQuickForm, type RulePrefill } from '../components/RuleQuickForm'
 import { fmtDate, fmtMoney } from '../format'
 
@@ -47,8 +46,6 @@ interface ImportResult {
 }
 
 export function ImportPage() {
-  const { user, logout } = useAuth()
-
   const [step, setStep] = useState(1)
   const [file, setFile] = useState<File | null>(null)
   const [preview, setPreview] = useState<Preview | null>(null)
@@ -163,16 +160,7 @@ export function ImportPage() {
 
   return (
     <div className="page">
-      <header className="topbar">
-        <h1>Загрузка выписки</h1>
-        <div className="topbar-right">
-          <Link className="link-btn" to="/statements">
-            ← Выписки
-          </Link>
-          <span className="muted">{user?.username}</span>
-          <button onClick={() => logout()}>Выйти</button>
-        </div>
-      </header>
+      <h1>Загрузка выписки</h1>
 
       <div className="stepper">
         <span className={step >= 1 ? 'step active' : 'step'}>1. Выбрать файл</span>

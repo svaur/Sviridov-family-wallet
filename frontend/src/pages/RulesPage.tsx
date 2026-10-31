@@ -1,7 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { Link, useLocation } from 'react-router-dom'
+import { useLocation } from 'react-router-dom'
 import { api, HttpError } from '../api'
-import { useAuth } from '../auth/AuthContext'
 import { buildRuleParams } from '../ruleHelpers'
 
 interface Category {
@@ -71,7 +70,6 @@ const emptyRule: RuleForm = {
 }
 
 export function RulesPage() {
-  const { user, logout } = useAuth()
   const location = useLocation()
   const [categories, setCategories] = useState<Category[]>([])
   const [rules, setRules] = useState<Rule[]>([])
@@ -286,16 +284,7 @@ export function RulesPage() {
 
   return (
     <div className="page">
-      <header className="topbar">
-        <h1>Правила и категории</h1>
-        <div className="topbar-right">
-          <Link className="link-btn" to="/">Дашборд</Link>
-          <Link className="link-btn" to="/statements">Выписки</Link>
-          <Link className="link-btn" to="/transactions">Операции</Link>
-          <span className="muted">{user?.username}</span>
-          <button onClick={() => logout()}>Выйти</button>
-        </div>
-      </header>
+      <h1>Правила и категории</h1>
 
       {error && <div className="error">{error}</div>}
 

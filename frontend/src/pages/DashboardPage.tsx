@@ -1,11 +1,9 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
 import {
   Bar, BarChart, CartesianGrid, Cell, Legend, Pie, PieChart,
   ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
 import { api, HttpError } from '../api'
-import { useAuth } from '../auth/AuthContext'
 import { fmtMoney } from '../format'
 
 interface MonthlyPoint {
@@ -58,7 +56,6 @@ function monthLabel(month: string): string {
 }
 
 export function DashboardPage() {
-  const { user, logout } = useAuth()
   const [from, setFrom] = useState(defaultRange().from)
   const [to, setTo] = useState(defaultRange().to)
   const [data, setData] = useState<Analytics | null>(null)
@@ -119,16 +116,7 @@ export function DashboardPage() {
 
   return (
     <div className="page">
-      <header className="topbar">
-        <h1>Дашборд</h1>
-        <div className="topbar-right">
-          <Link className="link-btn" to="/statements">Выписки</Link>
-          <Link className="link-btn" to="/rules">Правила</Link>
-          <Link className="link-btn" to="/transactions">Операции</Link>
-          <span className="muted">{user?.username}</span>
-          <button onClick={() => logout()}>Выйти</button>
-        </div>
-      </header>
+      <h1>Дашборд</h1>
 
       <div className="filter-bar">
         <label className="field">

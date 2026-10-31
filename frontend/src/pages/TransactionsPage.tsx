@@ -1,7 +1,5 @@
 import { Fragment, useEffect, useState, type FormEvent } from 'react'
-import { Link } from 'react-router-dom'
 import { api, HttpError } from '../api'
-import { useAuth } from '../auth/AuthContext'
 import { RuleQuickForm, type RulePrefill } from '../components/RuleQuickForm'
 import { fmtDate, fmtMoney } from '../format'
 
@@ -16,6 +14,7 @@ interface Transaction {
   categoryName: string | null
   source: string
   cardId: number | null
+  isTransfer: boolean
 }
 
 interface Category {
@@ -48,7 +47,6 @@ const emptyTx: TxForm = {
 }
 
 export function TransactionsPage() {
-  const { user, logout } = useAuth()
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [categories, setCategories] = useState<Category[]>([])
   const [cards, setCards] = useState<Card[]>([])
@@ -178,18 +176,19 @@ export function TransactionsPage() {
     }
   }
 
+  async function markTransfer(id: number) {
+    try {
+      await api.post<Transaction>(`/api/transactions/${id}/transfer`)
+      setExpandedId(null)
+      await load()
+    } catch (e) {
+      setError(e instanceof HttpError ? e.message : 'Не удалось отметить перевод')
+    }
+  }
+
   return (
     <div className="page">
-      <header className="topbar">
-        <h1>Операции</h1>
-        <div className="topbar-right">
-          <Link className="link-btn" to="/">Дашборд</Link>
-          <Link className="link-btn" to="/statements">Выписки</Link>
-          <Link className="link-btn" to="/rules">Правила</Link>
-          <span className="muted">{user?.username}</span>
-          <button onClick={() => logout()}>Выйти</button>
-        </div>
-      </header>
+      <h1>Операции</h1>
 
       {error && <div className="error">{error}</div>}
 
@@ -272,7 +271,8 @@ export function TransactionsPage() {
                       <td>{t.purpose ?? '—'}</td>
                       <td>{t.categoryName ?? '—'}</td>
                       <td>
-                        <span className={`badge ${badgeClass(t.source)}`}>{sourceLabel(t)}</span>
+                        <span className={`badge ${badgeClass(t.source)}`}>{sourceLabel(t)}</span>{' '}
+                        {t.isTransfer && <span className="badge badge-transfer">перевод</span>}
                       </td>
                       <td className={t.type === 'debit' ? 'amount-debit' : 'amount-credit'}>
                         {t.type === 'debit' ? '− ' : '+ '}
@@ -299,6 +299,9 @@ export function TransactionsPage() {
                             <button onClick={() => (rulePrefill ? setRulePrefill(null) : createRuleFrom(t))}>
                               {rulePrefill ? 'Скрыть форму' : 'Создать правило'}
                             </button>
+                            {!t.isTransfer && (
+                              <button onClick={() => markTransfer(t.id)}>Это перевод</button>
+                            )}
                             <button onClick={() => deleteTx(t)}>Удалить</button>
                           </div>
                           {rulePrefill && (

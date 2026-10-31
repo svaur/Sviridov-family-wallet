@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api, HttpError } from '../api'
-import { useAuth } from '../auth/AuthContext'
 import { fmtDate, fmtInstant } from '../format'
 
 interface Card {
@@ -28,8 +27,15 @@ interface Statement {
   account: string | null
 }
 
+interface Gap {
+  id: number
+  cardId: number
+  gapFrom: string
+  gapTo: string
+  detectedAt: string
+}
+
 export function StatementsPage() {
-  const { user, logout } = useAuth()
   const [cards, setCards] = useState<Card[]>([])
   const [statements, setStatements] = useState<Statement[]>([])
   const [cardFilter, setCardFilter] = useState<string>('')
@@ -38,16 +44,19 @@ export function StatementsPage() {
 
   const [renamingCardId, setRenamingCardId] = useState<number | null>(null)
   const [renameValue, setRenameValue] = useState('')
+  const [gaps, setGaps] = useState<Gap[]>([])
 
   async function load() {
     setLoading(true)
     try {
-      const [allCards, allStatements] = await Promise.all([
+      const [allCards, allStatements, allGaps] = await Promise.all([
         api.get<Card[]>('/api/cards'),
         api.get<Statement[]>('/api/statements'),
+        api.get<Gap[]>('/api/statement-gaps'),
       ])
       setCards(allCards)
       setStatements(allStatements)
+      setGaps(allGaps)
     } catch (e) {
       setError(e instanceof HttpError ? e.message : 'Не удалось загрузить данные')
     } finally {
@@ -86,22 +95,7 @@ export function StatementsPage() {
 
   return (
     <div className="page">
-      <header className="topbar">
-        <h1>Выписки</h1>
-        <div className="topbar-right">
-          <Link className="link-btn" to="/">
-            Дашборд
-          </Link>
-          <Link className="link-btn" to="/rules">
-            Правила
-          </Link>
-          <Link className="link-btn" to="/transactions">
-            Операции
-          </Link>
-          <span className="muted">{user?.username}</span>
-          <button onClick={() => logout()}>Выйти</button>
-        </div>
-      </header>
+      <h1>Выписки</h1>
 
       {error && <div className="error">{error}</div>}
 
@@ -194,6 +188,32 @@ export function StatementsPage() {
           </table>
         )}
       </section>
+
+      {gaps.length > 0 && (
+        <section className="card">
+          <h2>Пропуски в выписках</h2>
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Карта</th>
+                <th>Период пропуска</th>
+                <th>Обнаружен</th>
+              </tr>
+            </thead>
+            <tbody>
+              {gaps.map((g) => (
+                <tr key={g.id}>
+                  <td>{cardOf(g.cardId)?.displayName ?? '—'}</td>
+                  <td>
+                    {fmtDate(g.gapFrom)} — {fmtDate(g.gapTo)}
+                  </td>
+                  <td>{fmtInstant(g.detectedAt)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      )}
     </div>
   )
 }

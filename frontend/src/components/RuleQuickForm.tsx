@@ -23,8 +23,12 @@ interface RuleQuickFormProps {
 /**
  * Compact inline "create rule from example" form shown under a transaction row.
  * Pre-fills the counterparty and operation from the transaction; the user picks
- * the category and confirms. Priority defaults to 100 (above the built-in
- * defaults), name is left empty.
+ * the category and confirms. Priority defaults to 100, name is left empty.
+ *
+ * Before saving, it verifies the rule would match the template transaction. If
+ * it would not, an inline warning is shown (instead of the browser's native
+ * `confirm`, which can be suppressed) and the user can either force-save or
+ * cancel.
  */
 export function RuleQuickForm({ categories, prefill, onClose, onCreated }: RuleQuickFormProps) {
   const [categoryId, setCategoryId] = useState(prefill.categoryId != null ? String(prefill.categoryId) : '')
@@ -32,23 +36,15 @@ export function RuleQuickForm({ categories, prefill, onClose, onCreated }: RuleQ
   const [operation, setOperation] = useState(prefill.operation ?? '')
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [warnMismatch, setWarnMismatch] = useState(false)
 
-  async function submit(e: FormEvent) {
-    e.preventDefault()
-    setError(null)
-    const params = buildRuleParams({ purpose, operation, min: '', max: '', dayFrom: '', dayTo: '' })
-    const hasConditions = Object.keys(params).length > 0
-    if (hasConditions) {
-      const matches = ruleMatchesTemplate(params, {
-        purpose: prefill.purpose,
-        operation: prefill.operation,
-      })
-      if (!matches) {
-        const ok = window.confirm('Правило не применится на эту запись. Нажмите «ОК», чтобы продолжить.')
-        if (!ok) return
-      }
-    }
+  function buildParams(): Record<string, string | number> {
+    return buildRuleParams({ purpose, operation, min: '', max: '', dayFrom: '', dayTo: '' })
+  }
+
+  async function save(params: Record<string, string | number>) {
     setSaving(true)
+    setError(null)
     try {
       await api.post('/api/rules', {
         name: null,
@@ -66,6 +62,19 @@ export function RuleQuickForm({ categories, prefill, onClose, onCreated }: RuleQ
     } finally {
       setSaving(false)
     }
+  }
+
+  function submit(e: FormEvent) {
+    e.preventDefault()
+    setError(null)
+    const params = buildParams()
+    const hasConditions = Object.keys(params).length > 0
+    if (hasConditions && !ruleMatchesTemplate(params, { purpose: prefill.purpose, operation: prefill.operation })) {
+      setWarnMismatch(true)
+      return
+    }
+    setWarnMismatch(false)
+    void save(params)
   }
 
   return (
@@ -91,6 +100,19 @@ export function RuleQuickForm({ categories, prefill, onClose, onCreated }: RuleQ
           <input value={operation} onChange={(e) => setOperation(e.target.value)} placeholder="например: перевод" />
         </label>
       </div>
+      {warnMismatch && (
+        <div className="warning">
+          <p>Правило не применится на эту запись.</p>
+          <div className="row">
+            <button type="button" onClick={() => { setWarnMismatch(false); void save(buildParams()) }}>
+              Сохранить всё равно
+            </button>
+            <button type="button" onClick={() => setWarnMismatch(false)}>
+              Отмена
+            </button>
+          </div>
+        </div>
+      )}
       {error && <div className="error">{error}</div>}
       <div className="row">
         <button type="submit" disabled={saving}>

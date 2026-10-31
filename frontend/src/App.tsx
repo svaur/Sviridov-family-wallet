@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 import { AuthProvider } from './auth/AuthContext'
 import { RequireAuth } from './components/RequireAuth'
 import { CardsPage } from './pages/CardsPage'
+import { DashboardPage } from './pages/DashboardPage'
 import { LoginPage } from './pages/LoginPage'
 import { RulesPage } from './pages/RulesPage'
 import { StatementsPage } from './pages/StatementsPage'
@@ -16,10 +17,19 @@ export default function App() {
           path="/"
           element={
             <RequireAuth>
+              <DashboardPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/cards"
+          element={
+            <RequireAuth>
               <CardsPage />
             </RequireAuth>
           }
         />
+        <Route path="/dashboard" element={<Navigate to="/" replace />} />
         <Route
           path="/cards/:cardId/statements"
           element={

@@ -100,7 +100,7 @@ export function StatementsPage() {
       <header className="topbar">
         <h1>Выписки — {card?.displayName ?? `карта #${id}`}</h1>
         <div className="topbar-right">
-          <Link className="link-btn" to="/">
+          <Link className="link-btn" to="/cards">
             ← Карты
           </Link>
           <span className="muted">{user?.username}</span>
@@ -124,7 +124,7 @@ export function StatementsPage() {
         {mismatch && (
           <div className="warning">
             <p>{mismatch}</p>
-            <Link className="link-btn" to="/">
+            <Link className="link-btn" to="/cards">
               Создать карту
             </Link>
           </div>

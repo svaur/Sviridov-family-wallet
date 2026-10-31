@@ -185,6 +185,14 @@ public class Transaction {
         return isExcluded;
     }
 
+    public void setIsTransfer(boolean isTransfer) {
+        this.isTransfer = isTransfer;
+    }
+
+    public void setIsExcluded(boolean isExcluded) {
+        this.isExcluded = isExcluded;
+    }
+
     public String getComment() {
         return comment;
     }

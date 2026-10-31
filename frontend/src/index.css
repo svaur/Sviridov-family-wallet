@@ -245,3 +245,39 @@ button:disabled {
   background: #f3f4f6;
   color: #4b5563;
 }
+
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.kpi-grid .card {
+  margin-bottom: 0;
+  text-align: center;
+}
+
+.kpi-value {
+  font-size: 1.4rem;
+  font-weight: 600;
+}
+
+.pos {
+  color: #15803d;
+}
+
+.neg {
+  color: #b91c1c;
+}
+
+.filter-bar {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+}
+
+.filter-bar .field {
+  margin-bottom: 0;
+}

@@ -17,6 +17,12 @@
 - Secrets only via env / docker secrets; never commit real passwords or PII.
 - Test PDFs must be sanitized (no real personal data).
 
+## Categorization
+
+- Auto-application of rules and the manual "apply rules" button must NOT overwrite
+  a manually assigned category. Manual (explicit) category assignment is protected
+  from rules. Implement this protection in Stage 5.
+
 ## Other
 
 - Do not use the term MVP when working on new parts and features of the project.
@@ -29,3 +35,8 @@
 - Use the DRY approach. Before developing a new function or inventing a new
   style, make sure nothing similar already exists in the project.
 - Keep it simple (KISS): do not over-complicate code without necessity.
+- Before changing code to handle "legacy data" (rows missing a value only because
+  they predate a later feature — i.e. something forgotten in test data during
+  development), ask the user first. Resetting the test data is usually the
+  simpler fix; do not add backfill/special-case code for data that exists only
+  due to development history.

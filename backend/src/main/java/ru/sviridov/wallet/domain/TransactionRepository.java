@@ -6,6 +6,7 @@ import org.springframework.data.repository.query.Param;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
 public interface TransactionRepository extends JpaRepository<Transaction, Long> {
@@ -25,4 +26,6 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
             order by t.date desc, t.id desc
             """)
     List<Transaction> findActiveByUserId(@Param("userId") Long userId);
+
+    Optional<Transaction> findByIdAndUserId(Long id, Long userId);
 }

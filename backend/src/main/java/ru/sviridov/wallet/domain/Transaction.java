@@ -20,7 +20,8 @@ import java.time.LocalDate;
  * is optional (null for cash/other). {@code fingerprint} is the SHA-256 dedup
  * key for statement rows; rows are soft-deleted via {@code deletedAt} (tombstone).
  * {@code merchantNormalized} and {@code categoryId} are filled by the
- * normalizer/categorizer.
+ * normalizer/categorizer. {@code categoryManual} marks a category assigned by
+ * hand, which rules must never overwrite.
  */
 @Entity
 @Table(name = "transactions")
@@ -71,6 +72,9 @@ public class Transaction {
     @Column(name = "category_id")
     private Long categoryId;
 
+    @Column(name = "category_manual", nullable = false)
+    private boolean categoryManual;
+
     @Column(name = "is_transfer", nullable = false)
     private boolean isTransfer;
 
@@ -106,6 +110,7 @@ public class Transaction {
         this.fingerprint = fingerprint;
         this.isTransfer = false;
         this.isExcluded = false;
+        this.categoryManual = false;
         this.createdAt = Instant.now();
     }
 
@@ -177,6 +182,14 @@ public class Transaction {
         this.categoryId = categoryId;
     }
 
+    public boolean isCategoryManual() {
+        return categoryManual;
+    }
+
+    public void setCategoryManual(boolean categoryManual) {
+        this.categoryManual = categoryManual;
+    }
+
     public boolean isTransfer() {
         return isTransfer;
     }
@@ -203,6 +216,10 @@ public class Transaction {
 
     public Instant getDeletedAt() {
         return deletedAt;
+    }
+
+    public void setDeletedAt(Instant deletedAt) {
+        this.deletedAt = deletedAt;
     }
 
     public Instant getCreatedAt() {

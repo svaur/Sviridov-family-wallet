@@ -36,6 +36,18 @@ class CategorizationEngineTest {
     }
 
     @Test
+    void operationContainsMatches() {
+        Rule rule = rule("{\"operation_contains\":\"перевод\"}", 13L);
+        assertThat(engine.categorize(tx("Перевод средств"), List.of(rule))).isEqualTo(13L);
+    }
+
+    @Test
+    void operationRegexMatchesCaseInsensitive() {
+        Rule rule = rule("{\"operation_regex\":\"ПЕРЕВОД\"}", 14L);
+        assertThat(engine.categorize(tx("Перевод средств"), List.of(rule))).isEqualTo(14L);
+    }
+
+    @Test
     void amountRangeIsInclusive() {
         Rule rule = rule("{\"min\":100,\"max\":500}", 30L);
         assertThat(engine.categorize(tx("x", "500.00"), List.of(rule))).isEqualTo(30L);

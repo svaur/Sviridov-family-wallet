@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import { api, HttpError } from '../api'
 import { useAuth } from '../auth/AuthContext'
 
@@ -18,6 +18,12 @@ interface Rule {
   autoLearned: boolean
 }
 
+interface RulePrefill {
+  purpose: string | null
+  operation: string | null
+  categoryId: number | null
+}
+
 function isRegex(value: string): boolean {
   return /[\\^$*+?()[\]{}|]/.test(value)
 }
@@ -27,6 +33,8 @@ function paramsLabel(rule: Rule) {
   const parts: string[] = []
   if (p.merchant_contains != null) parts.push(`назначение платежа содержит «${p.merchant_contains}»`)
   if (p.merchant_regex != null) parts.push(`назначение платежа (regex) «${p.merchant_regex}»`)
+  if (p.operation_contains != null) parts.push(`операция содержит «${p.operation_contains}»`)
+  if (p.operation_regex != null) parts.push(`операция (regex) «${p.operation_regex}»`)
   if (p.min != null || p.max != null) parts.push(`сумма ${p.min ?? '—'}…${p.max ?? '—'}`)
   if (p.day_from != null || p.day_to != null) {
     parts.push(p.day_from === p.day_to ? `день ${p.day_from}` : `день ${p.day_from ?? '—'}…${p.day_to ?? '—'}`)
@@ -44,6 +52,7 @@ interface RuleForm {
   categoryId: string
   priority: string
   purpose: string
+  operation: string
   min: string
   max: string
   dayFrom: string
@@ -57,6 +66,7 @@ const emptyRule: RuleForm = {
   categoryId: '',
   priority: '100',
   purpose: '',
+  operation: '',
   min: '',
   max: '',
   dayFrom: '',
@@ -65,6 +75,7 @@ const emptyRule: RuleForm = {
 
 export function RulesPage() {
   const { user, logout } = useAuth()
+  const location = useLocation()
   const [categories, setCategories] = useState<Category[]>([])
   const [rules, setRules] = useState<Rule[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -72,10 +83,14 @@ export function RulesPage() {
   const [catEditingId, setCatEditingId] = useState<number | null>(null)
   const [catForm, setCatForm] = useState<CategoryForm>(emptyCategory)
   const [catFormError, setCatFormError] = useState<string | null>(null)
+  const [showCatForm, setShowCatForm] = useState(false)
 
   const [ruleEditingId, setRuleEditingId] = useState<number | null>(null)
   const [ruleForm, setRuleForm] = useState<RuleForm>(emptyRule)
   const [ruleFormError, setRuleFormError] = useState<string | null>(null)
+  const [showRuleForm, setShowRuleForm] = useState(false)
+  const [applyMsg, setApplyMsg] = useState<{ text: string; ok: boolean } | null>(null)
+  const [applying, setApplying] = useState(false)
 
   async function load() {
     try {
@@ -94,6 +109,26 @@ export function RulesPage() {
     load()
   }, [])
 
+  useEffect(() => {
+    const prefill = (location.state as { rulePrefill?: RulePrefill } | null)?.rulePrefill
+    if (prefill) {
+      setRuleEditingId(null)
+      setRuleForm({
+        name: '',
+        categoryId: prefill.categoryId != null ? String(prefill.categoryId) : '',
+        priority: '100',
+        purpose: prefill.purpose ?? '',
+        operation: prefill.operation ?? '',
+        min: '',
+        max: '',
+        dayFrom: '',
+        dayTo: '',
+      })
+      setRuleFormError(null)
+      setShowRuleForm(true)
+    }
+  }, [location.state])
+
   function errMessage(err: unknown) {
     if (err instanceof HttpError && err.fieldErrors.length > 0) {
       return err.fieldErrors.map((f) => f.message).join('; ')
@@ -111,11 +146,19 @@ export function RulesPage() {
     setCatEditingId(null)
     setCatForm(emptyCategory)
     setCatFormError(null)
+    setShowCatForm(true)
   }
 
   function startCatEdit(c: Category) {
     setCatEditingId(c.id)
     setCatForm({ name: c.name, parentId: c.parentId == null ? '0' : String(c.parentId) })
+    setCatFormError(null)
+    setShowCatForm(true)
+  }
+
+  function closeCatForm() {
+    setShowCatForm(false)
+    setCatForm(emptyCategory)
     setCatFormError(null)
   }
 
@@ -132,7 +175,7 @@ export function RulesPage() {
       } else {
         await api.put<Category>(`/api/categories/${catEditingId}`, payload)
       }
-      startCatCreate()
+      closeCatForm()
       await load()
     } catch (err) {
       setCatFormError(errMessage(err))
@@ -154,6 +197,7 @@ export function RulesPage() {
     setRuleEditingId(null)
     setRuleForm(emptyRule)
     setRuleFormError(null)
+    setShowRuleForm(true)
   }
 
   function startRuleEdit(r: Rule) {
@@ -169,11 +213,24 @@ export function RulesPage() {
           : p.merchant_contains != null
             ? String(p.merchant_contains)
             : '',
+      operation:
+        p.operation_regex != null
+          ? String(p.operation_regex)
+          : p.operation_contains != null
+            ? String(p.operation_contains)
+            : '',
       min: p.min != null ? String(p.min) : '',
       max: p.max != null ? String(p.max) : '',
       dayFrom: p.day_from != null ? String(p.day_from) : '',
       dayTo: p.day_to != null ? String(p.day_to) : '',
     })
+    setRuleFormError(null)
+    setShowRuleForm(true)
+  }
+
+  function closeRuleForm() {
+    setShowRuleForm(false)
+    setRuleForm(emptyRule)
     setRuleFormError(null)
   }
 
@@ -185,6 +242,14 @@ export function RulesPage() {
         params.merchant_regex = purpose
       } else {
         params.merchant_contains = purpose
+      }
+    }
+    const operation = f.operation.trim()
+    if (operation !== '') {
+      if (isRegex(operation)) {
+        params.operation_regex = operation
+      } else {
+        params.operation_contains = operation
       }
     }
     if (f.min !== '') params.min = Number(f.min)
@@ -209,7 +274,7 @@ export function RulesPage() {
       } else {
         await api.put<Rule>(`/api/rules/${ruleEditingId}`, payload)
       }
-      startRuleCreate()
+      closeRuleForm()
       await load()
     } catch (err) {
       setRuleFormError(errMessage(err))
@@ -223,6 +288,27 @@ export function RulesPage() {
       await load()
     } catch (e) {
       setError(e instanceof HttpError ? e.message : 'Не удалось удалить правило')
+    }
+  }
+
+  async function applyRules() {
+    setApplyMsg(null)
+    setApplying(true)
+    try {
+      const res = await api.post<{ recategorized: number }>('/api/rules/apply')
+      setApplyMsg({
+        ok: true,
+        text: res.recategorized === 0
+          ? 'Все операции уже соответствуют правилам'
+          : `Перекатегоризировано операций: ${res.recategorized}`,
+      })
+    } catch (e) {
+      setApplyMsg({
+        ok: false,
+        text: e instanceof HttpError ? e.message : 'Не удалось применить правила',
+      })
+    } finally {
+      setApplying(false)
     }
   }
 
@@ -243,41 +329,47 @@ export function RulesPage() {
 
       <section className="card">
         <h2>Категории</h2>
-        <form className="form-grid" onSubmit={saveCategory}>
-          <label className="field">
-            <span>Название</span>
-            <input
-              value={catForm.name}
-              onChange={(e) => setCatForm({ ...catForm, name: e.target.value })}
-              required
-            />
-          </label>
-          <label className="field">
-            <span>Родительская категория</span>
-            <select
-              value={catForm.parentId}
-              onChange={(e) => setCatForm({ ...catForm, parentId: e.target.value })}
-            >
-              <option value="0">— нет —</option>
-              {categories
-                .filter((c) => c.id !== catEditingId)
-                .map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-            </select>
-          </label>
-          {catFormError && <div className="error">{catFormError}</div>}
-          <div className="row">
-            <button type="submit">{catEditingId === null ? 'Добавить' : 'Сохранить'}</button>
-            {catEditingId !== null && (
-              <button type="button" onClick={startCatCreate}>
+        {showCatForm ? (
+          <form className="form-grid" onSubmit={saveCategory}>
+            <label className="field">
+              <span>Название</span>
+              <input
+                value={catForm.name}
+                onChange={(e) => setCatForm({ ...catForm, name: e.target.value })}
+                required
+              />
+            </label>
+            <label className="field">
+              <span>Родительская категория</span>
+              <select
+                value={catForm.parentId}
+                onChange={(e) => setCatForm({ ...catForm, parentId: e.target.value })}
+              >
+                <option value="0">— нет —</option>
+                {categories
+                  .filter((c) => c.id !== catEditingId)
+                  .map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+              </select>
+            </label>
+            {catFormError && <div className="error">{catFormError}</div>}
+            <div className="row">
+              <button type="submit">{catEditingId === null ? 'Добавить' : 'Сохранить'}</button>
+              <button type="button" onClick={closeCatForm}>
                 Отмена
               </button>
-            )}
+            </div>
+          </form>
+        ) : (
+          <div className="row">
+            <button type="button" onClick={startCatCreate}>
+              Создать категорию
+            </button>
           </div>
-        </form>
+        )}
 
         <table className="table">
           <thead>
@@ -310,97 +402,117 @@ export function RulesPage() {
       <section className="card">
         <h2>Правила</h2>
         <p className="muted">Правило срабатывает, если совпадают все заполненные условия. Пустые поля игнорируются.</p>
-        <form className="form-grid" onSubmit={saveRule}>
-          <label className="field">
-            <span>Имя правила</span>
-            <input
-              value={ruleForm.name}
-              onChange={(e) => setRuleForm({ ...ruleForm, name: e.target.value })}
-              placeholder="например: Продукты — Магнит"
-            />
-          </label>
-          <label className="field">
-            <span>Категория</span>
-            <select
-              value={ruleForm.categoryId}
-              onChange={(e) => setRuleForm({ ...ruleForm, categoryId: e.target.value })}
-              required
-            >
-              <option value="">— выберите —</option>
-              {categories.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="field">
-            <span>Приоритет</span>
-            <input
-              type="number"
-              value={ruleForm.priority}
-              onChange={(e) => setRuleForm({ ...ruleForm, priority: e.target.value })}
-            />
-          </label>
-          <label className="field">
-            <span>Назначение платежа (включая регулярные выражения)</span>
-            <input
-              value={ruleForm.purpose}
-              onChange={(e) => setRuleForm({ ...ruleForm, purpose: e.target.value })}
-              placeholder="например: korma или ^korma"
-            />
-          </label>
-          <label className="field">
-            <span>Сумма от</span>
-            <input
-              type="number"
-              step="0.01"
-              min={0}
-              value={ruleForm.min}
-              onChange={(e) => setRuleForm({ ...ruleForm, min: e.target.value })}
-            />
-          </label>
-          <label className="field">
-            <span>Сумма до</span>
-            <input
-              type="number"
-              step="0.01"
-              min={0}
-              value={ruleForm.max}
-              onChange={(e) => setRuleForm({ ...ruleForm, max: e.target.value })}
-            />
-          </label>
-          <label className="field">
-            <span>День месяца от (1–31)</span>
-            <input
-              type="number"
-              min={1}
-              max={31}
-              value={ruleForm.dayFrom}
-              onChange={(e) => setRuleForm({ ...ruleForm, dayFrom: e.target.value })}
-            />
-          </label>
-          <label className="field">
-            <span>День месяца до (1–31)</span>
-            <input
-              type="number"
-              min={1}
-              max={31}
-              value={ruleForm.dayTo}
-              onChange={(e) => setRuleForm({ ...ruleForm, dayTo: e.target.value })}
-            />
-          </label>
+        {showRuleForm ? (
+          <form className="form-grid" onSubmit={saveRule}>
+            <label className="field">
+              <span>Имя правила</span>
+              <input
+                value={ruleForm.name}
+                onChange={(e) => setRuleForm({ ...ruleForm, name: e.target.value })}
+                placeholder="например: Продукты — Магнит"
+              />
+            </label>
+            <label className="field">
+              <span>Категория</span>
+              <select
+                value={ruleForm.categoryId}
+                onChange={(e) => setRuleForm({ ...ruleForm, categoryId: e.target.value })}
+                required
+              >
+                <option value="">— выберите —</option>
+                {categories.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>Приоритет</span>
+              <input
+                type="number"
+                value={ruleForm.priority}
+                onChange={(e) => setRuleForm({ ...ruleForm, priority: e.target.value })}
+              />
+            </label>
+            <label className="field">
+              <span>Назначение платежа (включая регулярные выражения)</span>
+              <input
+                value={ruleForm.purpose}
+                onChange={(e) => setRuleForm({ ...ruleForm, purpose: e.target.value })}
+                placeholder="например: korma или ^korma"
+              />
+            </label>
+            <label className="field">
+              <span>Операция (включая регулярные выражения)</span>
+              <input
+                value={ruleForm.operation}
+                onChange={(e) => setRuleForm({ ...ruleForm, operation: e.target.value })}
+                placeholder="например: перевод или ^покупка"
+              />
+            </label>
+            <label className="field">
+              <span>Сумма от</span>
+              <input
+                type="number"
+                step="0.01"
+                min={0}
+                value={ruleForm.min}
+                onChange={(e) => setRuleForm({ ...ruleForm, min: e.target.value })}
+              />
+            </label>
+            <label className="field">
+              <span>Сумма до</span>
+              <input
+                type="number"
+                step="0.01"
+                min={0}
+                value={ruleForm.max}
+                onChange={(e) => setRuleForm({ ...ruleForm, max: e.target.value })}
+              />
+            </label>
+            <label className="field">
+              <span>День месяца от (1–31)</span>
+              <input
+                type="number"
+                min={1}
+                max={31}
+                value={ruleForm.dayFrom}
+                onChange={(e) => setRuleForm({ ...ruleForm, dayFrom: e.target.value })}
+              />
+            </label>
+            <label className="field">
+              <span>День месяца до (1–31)</span>
+              <input
+                type="number"
+                min={1}
+                max={31}
+                value={ruleForm.dayTo}
+                onChange={(e) => setRuleForm({ ...ruleForm, dayTo: e.target.value })}
+              />
+            </label>
 
-          {ruleFormError && <div className="error">{ruleFormError}</div>}
-          <div className="row">
-            <button type="submit">{ruleEditingId === null ? 'Добавить' : 'Сохранить'}</button>
-            {ruleEditingId !== null && (
-              <button type="button" onClick={startRuleCreate}>
+            {ruleFormError && <div className="error">{ruleFormError}</div>}
+            <div className="row">
+              <button type="submit">{ruleEditingId === null ? 'Добавить' : 'Сохранить'}</button>
+              <button type="button" onClick={closeRuleForm}>
                 Отмена
               </button>
-            )}
+            </div>
+          </form>
+        ) : (
+          <div className="row">
+            <button type="button" onClick={startRuleCreate}>
+              Создать правило
+            </button>
           </div>
-        </form>
+        )}
+        <div className="row">
+          <button type="button" onClick={applyRules} disabled={applying}>
+            {applying ? 'Применяю…' : 'Применить правила'}
+          </button>
+          {applyMsg && <span className={applyMsg.ok ? 'success' : 'error'}>{applyMsg.text}</span>}
+        </div>
 
         <table className="table">
           <thead>

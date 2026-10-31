@@ -271,6 +271,10 @@ button:disabled {
   color: #b91c1c;
 }
 
+.success {
+  color: #15803d;
+}
+
 .filter-bar {
   display: flex;
   align-items: flex-end;
@@ -280,4 +284,20 @@ button:disabled {
 
 .filter-bar .field {
   margin-bottom: 0;
+}
+
+.tx-row {
+  cursor: pointer;
+}
+
+.tx-row:hover {
+  background: #f9fafb;
+}
+
+.tx-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding: 0.25rem 0;
 }

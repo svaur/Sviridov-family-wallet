@@ -1,5 +1,5 @@
-import { useEffect, useState, type FormEvent } from 'react'
-import { Link } from 'react-router-dom'
+import { Fragment, useEffect, useState, type FormEvent } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
 import { api, HttpError } from '../api'
 import { useAuth } from '../auth/AuthContext'
 import { fmtDate, fmtMoney } from '../format'
@@ -9,6 +9,7 @@ interface Transaction {
   date: string
   operation: string | null
   purpose: string | null
+  merchantNormalized: string | null
   amount: number | string
   type: string
   categoryId: number | null
@@ -48,6 +49,7 @@ const emptyTx: TxForm = {
 
 export function TransactionsPage() {
   const { user, logout } = useAuth()
+  const navigate = useNavigate()
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [categories, setCategories] = useState<Category[]>([])
   const [cards, setCards] = useState<Card[]>([])
@@ -56,6 +58,9 @@ export function TransactionsPage() {
 
   const [txForm, setTxForm] = useState<TxForm>(emptyTx)
   const [txFormError, setTxFormError] = useState<string | null>(null)
+
+  const [expandedId, setExpandedId] = useState<number | null>(null)
+  const [assignCat, setAssignCat] = useState('')
 
   async function load() {
     setLoading(true)
@@ -132,6 +137,50 @@ export function TransactionsPage() {
     return 'badge-other'
   }
 
+  function toggleRow(id: number) {
+    if (expandedId === id) {
+      setExpandedId(null)
+    } else {
+      setExpandedId(id)
+    }
+    setAssignCat('')
+  }
+
+  async function deleteTx(t: Transaction) {
+    if (!window.confirm('Удалить операцию?')) return
+    try {
+      await api.del(`/api/transactions/${t.id}`)
+      setExpandedId(null)
+      await load()
+    } catch (e) {
+      setError(e instanceof HttpError ? e.message : 'Не удалось удалить операцию')
+    }
+  }
+
+  function createRuleFrom(t: Transaction) {
+    navigate('/rules', {
+      state: {
+        rulePrefill: {
+          purpose: t.merchantNormalized ?? t.purpose ?? null,
+          operation: t.operation ?? null,
+          categoryId: t.categoryId,
+        },
+      },
+    })
+  }
+
+  async function assignCategory(id: number) {
+    if (assignCat === '') return
+    try {
+      await api.post<Transaction>(`/api/transactions/${id}/category`, { categoryId: Number(assignCat) })
+      setExpandedId(null)
+      setAssignCat('')
+      await load()
+    } catch (e) {
+      setError(e instanceof HttpError ? e.message : 'Не удалось назначить категорию')
+    }
+  }
+
   return (
     <div className="page">
       <header className="topbar">
@@ -204,40 +253,68 @@ export function TransactionsPage() {
         {loading ? (
           <p>Загрузка…</p>
         ) : (
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Дата</th>
-                <th>Операция</th>
-                <th>Назначение платежа</th>
-                <th>Категория</th>
-                <th>Источник</th>
-                <th style={{ textAlign: 'right' }}>Сумма</th>
-              </tr>
-            </thead>
-            <tbody>
-              {transactions.map((t) => (
-                <tr key={t.id}>
-                  <td>{fmtDate(t.date)}</td>
-                  <td>{t.operation ?? '—'}</td>
-                  <td>{t.purpose ?? '—'}</td>
-                  <td>{t.categoryName ?? '—'}</td>
-                  <td>
-                    <span className={`badge ${badgeClass(t.source)}`}>{sourceLabel(t)}</span>
-                  </td>
-                  <td className={t.type === 'debit' ? 'amount-debit' : 'amount-credit'}>
-                    {t.type === 'debit' ? '− ' : '+ '}
-                    {fmtMoney(t.amount)}
-                  </td>
-                </tr>
-              ))}
-              {transactions.length === 0 && (
+          <>
+            <p className="muted">Нажмите на операцию, чтобы удалить её, назначить категорию или создать правило.</p>
+            <table className="table">
+              <thead>
                 <tr>
-                  <td colSpan={6}>Операций пока нет</td>
+                  <th>Дата</th>
+                  <th>Операция</th>
+                  <th>Назначение платежа</th>
+                  <th>Категория</th>
+                  <th>Источник</th>
+                  <th style={{ textAlign: 'right' }}>Сумма</th>
                 </tr>
-              )}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {transactions.map((t) => (
+                  <Fragment key={t.id}>
+                    <tr className="tx-row" onClick={() => toggleRow(t.id)}>
+                      <td>{fmtDate(t.date)}</td>
+                      <td>{t.operation ?? '—'}</td>
+                      <td>{t.purpose ?? '—'}</td>
+                      <td>{t.categoryName ?? '—'}</td>
+                      <td>
+                        <span className={`badge ${badgeClass(t.source)}`}>{sourceLabel(t)}</span>
+                      </td>
+                      <td className={t.type === 'debit' ? 'amount-debit' : 'amount-credit'}>
+                        {t.type === 'debit' ? '− ' : '+ '}
+                        {fmtMoney(t.amount)}
+                      </td>
+                    </tr>
+                    {expandedId === t.id && (
+                      <tr>
+                        <td colSpan={6}>
+                          <div className="tx-actions">
+                            <select
+                              value={assignCat}
+                              onChange={(e) => setAssignCat(e.target.value)}
+                              aria-label="Категория вручную"
+                            >
+                              <option value="">— категория —</option>
+                              {categories.map((c) => (
+                                <option key={c.id} value={c.id}>{c.name}</option>
+                              ))}
+                            </select>
+                            <button onClick={() => assignCategory(t.id)} disabled={assignCat === ''}>
+                              Назначить категорию
+                            </button>
+                            <button onClick={() => createRuleFrom(t)}>Создать правило</button>
+                            <button onClick={() => deleteTx(t)}>Удалить</button>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                ))}
+                {transactions.length === 0 && (
+                  <tr>
+                    <td colSpan={6}>Операций пока нет</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </>
         )}
       </section>
     </div>

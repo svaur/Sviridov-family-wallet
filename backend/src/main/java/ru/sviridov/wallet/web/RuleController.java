@@ -14,6 +14,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import ru.sviridov.wallet.security.AppUser;
 import ru.sviridov.wallet.service.RuleService;
+import ru.sviridov.wallet.service.TransactionService;
+import ru.sviridov.wallet.web.dto.RuleApplyResponse;
 import ru.sviridov.wallet.web.dto.RuleRequest;
 import ru.sviridov.wallet.web.dto.RuleResponse;
 
@@ -24,9 +26,11 @@ import java.util.List;
 public class RuleController {
 
     private final RuleService ruleService;
+    private final TransactionService transactionService;
 
-    public RuleController(RuleService ruleService) {
+    public RuleController(RuleService ruleService, TransactionService transactionService) {
         this.ruleService = ruleService;
+        this.transactionService = transactionService;
     }
 
     @GetMapping
@@ -52,5 +56,10 @@ public class RuleController {
     public ResponseEntity<Void> delete(@AuthenticationPrincipal AppUser user, @PathVariable Long id) {
         ruleService.delete(user.getId(), id);
         return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/apply")
+    public RuleApplyResponse apply(@AuthenticationPrincipal AppUser user) {
+        return new RuleApplyResponse(transactionService.reCategorizeAll(user.getId()));
     }
 }

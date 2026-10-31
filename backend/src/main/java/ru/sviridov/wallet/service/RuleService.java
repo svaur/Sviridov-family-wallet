@@ -28,6 +28,7 @@ public class RuleService {
 
     private static final Set<String> KNOWN_KEYS = Set.of(
             Rule.KEY_MERCHANT_CONTAINS, Rule.KEY_MERCHANT_REGEX,
+            Rule.KEY_OPERATION_CONTAINS, Rule.KEY_OPERATION_REGEX,
             Rule.KEY_MIN, Rule.KEY_MAX, Rule.KEY_DAY_FROM, Rule.KEY_DAY_TO);
 
     private final RuleRepository ruleRepository;
@@ -128,6 +129,27 @@ public class RuleService {
                 throw new BadRequestException("Некорректное регулярное выражение: " + e.getMessage());
             }
             out.put(Rule.KEY_MERCHANT_REGEX, pattern);
+        }
+
+        if (in.containsKey(Rule.KEY_OPERATION_CONTAINS)) {
+            String value = optionalString(in, Rule.KEY_OPERATION_CONTAINS);
+            if (value == null) {
+                throw new BadRequestException("Условие 'operation_contains' не может быть пустым");
+            }
+            out.put(Rule.KEY_OPERATION_CONTAINS, merchantNormalizer.normalizeCore(value));
+        }
+
+        if (in.containsKey(Rule.KEY_OPERATION_REGEX)) {
+            String pattern = optionalString(in, Rule.KEY_OPERATION_REGEX);
+            if (pattern == null) {
+                throw new BadRequestException("Условие 'operation_regex' не может быть пустым");
+            }
+            try {
+                Pattern.compile(pattern);
+            } catch (PatternSyntaxException e) {
+                throw new BadRequestException("Некорректное регулярное выражение: " + e.getMessage());
+            }
+            out.put(Rule.KEY_OPERATION_REGEX, pattern);
         }
 
         BigDecimal min = null;

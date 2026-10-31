@@ -72,6 +72,32 @@ public class CategorizationEngine {
             }
         }
 
+        String operation = tx.getOperation();
+
+        if (params.containsKey(Rule.KEY_OPERATION_CONTAINS)) {
+            String needle = merchantNormalizer.normalizeCore(asString(params.get(Rule.KEY_OPERATION_CONTAINS)));
+            if (operation == null || needle == null
+                    || !merchantNormalizer.normalizeCore(operation).contains(needle)) {
+                return false;
+            }
+        }
+
+        if (params.containsKey(Rule.KEY_OPERATION_REGEX)) {
+            String pattern = asString(params.get(Rule.KEY_OPERATION_REGEX));
+            if (operation == null || pattern == null || pattern.isBlank()) {
+                return false;
+            }
+            try {
+                if (!Pattern.compile(pattern, Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE)
+                        .matcher(operation)
+                        .find()) {
+                    return false;
+                }
+            } catch (PatternSyntaxException e) {
+                return false;
+            }
+        }
+
         BigDecimal amount = tx.getAmount();
         if (params.containsKey(Rule.KEY_MIN)) {
             BigDecimal min = asDecimal(params.get(Rule.KEY_MIN));

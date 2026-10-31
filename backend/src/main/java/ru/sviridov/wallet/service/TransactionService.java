@@ -14,6 +14,7 @@ import ru.sviridov.wallet.web.NotFoundException;
 import ru.sviridov.wallet.web.dto.TransactionRequest;
 import ru.sviridov.wallet.web.dto.TransactionResponse;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -87,6 +88,7 @@ public class TransactionService {
         tx.setCategoryId(request.categoryId() != null
                 ? request.categoryId()
                 : categorizationEngine.categorize(tx, rules));
+        tx.setCategoryManual(request.categoryId() != null);
         tx = transactionRepository.save(tx);
 
         String categoryName = tx.getCategoryId() == null
@@ -95,20 +97,59 @@ public class TransactionService {
         return TransactionResponse.from(tx, categoryName);
     }
 
+    /** Soft-deletes a transaction (tombstone; its fingerprint still blocks re-import). */
+    @Transactional
+    public void delete(Long userId, Long id) {
+        Transaction tx = transactionRepository.findByIdAndUserId(id, userId)
+                .orElseThrow(() -> new NotFoundException("Операция не найдена"));
+        tx.setDeletedAt(Instant.now());
+        transactionRepository.save(tx);
+    }
+
+    /**
+     * Assigns a category to a transaction manually (bypassing rules). The
+     * assignment is marked manual so re-running rules never overwrites it.
+     */
+    @Transactional
+    public TransactionResponse assignCategory(Long userId, Long id, Long categoryId) {
+        Transaction tx = transactionRepository.findByIdAndUserId(id, userId)
+                .orElseThrow(() -> new NotFoundException("Операция не найдена"));
+        if (tx.getDeletedAt() != null) {
+            throw new NotFoundException("Операция не найдена");
+        }
+        categoryRepository.findByIdAndUserId(categoryId, userId)
+                .orElseThrow(() -> new NotFoundException("Категория не найдена"));
+        tx.setCategoryId(categoryId);
+        tx.setCategoryManual(true);
+        tx = transactionRepository.save(tx);
+
+        String categoryName = categoryRepository.findById(categoryId).map(Category::getName).orElse(null);
+        return TransactionResponse.from(tx, categoryName);
+    }
+
     /**
      * Re-runs the full rule set (priority order) over the user's active
      * transactions and updates category assignments in place. Called after any
-     * rule or category change. Entities are managed, so Hibernate dirty checking
-     * persists the changes on flush.
+     * rule or category change. Transactions with a manually assigned category
+     * are skipped. Entities are managed, so Hibernate dirty checking persists
+     * the changes on flush.
+     *
+     * @return the number of transactions whose category changed
      */
     @Transactional
-    public void reCategorizeAll(Long userId) {
+    public int reCategorizeAll(Long userId) {
         List<Rule> rules = ruleRepository.findByUserIdOrderByPriorityDescIdAsc(userId);
+        int changed = 0;
         for (Transaction tx : transactionRepository.findActiveByUserId(userId)) {
+            if (tx.isCategoryManual()) {
+                continue;
+            }
             Long categoryId = categorizationEngine.categorize(tx, rules);
             if (!Objects.equals(tx.getCategoryId(), categoryId)) {
                 tx.setCategoryId(categoryId);
+                changed++;
             }
         }
+        return changed;
     }
 }

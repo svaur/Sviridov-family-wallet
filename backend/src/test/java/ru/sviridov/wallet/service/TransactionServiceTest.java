@@ -9,7 +9,9 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import ru.sviridov.wallet.domain.Card;
 import ru.sviridov.wallet.domain.CardRepository;
+import ru.sviridov.wallet.domain.Category;
 import ru.sviridov.wallet.domain.CategoryRepository;
+import ru.sviridov.wallet.domain.Rule;
 import ru.sviridov.wallet.domain.RuleRepository;
 import ru.sviridov.wallet.domain.Transaction;
 import ru.sviridov.wallet.domain.TransactionRepository;
@@ -109,5 +111,67 @@ class TransactionServiceTest {
 
         assertThatThrownBy(() -> service.create(userId, request("card", cardId)))
                 .isInstanceOf(NotFoundException.class);
+    }
+
+    @Test
+    void deleteSoftDeletesTransaction() {
+        Long userId = 1L, txId = 5L;
+        Transaction tx = new Transaction(userId, 1L, null, LocalDate.of(2026, 10, 1),
+                "добавлено вручную", "Магазин", new BigDecimal("100.00"), "debit", null);
+        when(transactionRepository.findByIdAndUserId(txId, userId)).thenReturn(Optional.of(tx));
+
+        service.delete(userId, txId);
+
+        ArgumentCaptor<Transaction> captor = ArgumentCaptor.forClass(Transaction.class);
+        verify(transactionRepository).save(captor.capture());
+        assertThat(captor.getValue().getDeletedAt()).isNotNull();
+    }
+
+    @Test
+    void assignCategoryMarksManual() {
+        Long userId = 1L, txId = 5L, categoryId = 7L;
+        Transaction tx = new Transaction(userId, 1L, null, LocalDate.of(2026, 10, 1),
+                "добавлено вручную", "Магазин", new BigDecimal("100.00"), "debit", null);
+        when(transactionRepository.findByIdAndUserId(txId, userId)).thenReturn(Optional.of(tx));
+        when(categoryRepository.findByIdAndUserId(categoryId, userId))
+                .thenReturn(Optional.of(new Category(userId, "Аптека")));
+
+        service.assignCategory(userId, txId, categoryId);
+
+        ArgumentCaptor<Transaction> captor = ArgumentCaptor.forClass(Transaction.class);
+        verify(transactionRepository).save(captor.capture());
+        assertThat(captor.getValue().getCategoryId()).isEqualTo(categoryId);
+        assertThat(captor.getValue().isCategoryManual()).isTrue();
+    }
+
+    @Test
+    void reCategorizeAllSkipsManualCategory() {
+        Long userId = 1L;
+        Transaction manual = new Transaction(userId, 1L, null, LocalDate.of(2026, 10, 1),
+                "добавлено вручную", "Магазин", new BigDecimal("100.00"), "debit", null);
+        manual.setCategoryId(7L);
+        manual.setCategoryManual(true);
+        when(transactionRepository.findActiveByUserId(userId)).thenReturn(List.of(manual));
+
+        int changed = service.reCategorizeAll(userId);
+
+        assertThat(changed).isZero();
+        assertThat(manual.getCategoryId()).isEqualTo(7L);
+    }
+
+    @Test
+    void reCategorizeAllUpdatesNonManual() {
+        Long userId = 1L;
+        Transaction tx = new Transaction(userId, 1L, null, LocalDate.of(2026, 10, 1),
+                "добавлено вручную", "Магазин", new BigDecimal("100.00"), "debit", null);
+        tx.setMerchantNormalized("магазин");
+        Rule rule = new Rule(userId, null, "{\"merchant_contains\":\"магазин\"}", 7L, 0, false);
+        when(ruleRepository.findByUserIdOrderByPriorityDescIdAsc(userId)).thenReturn(List.of(rule));
+        when(transactionRepository.findActiveByUserId(userId)).thenReturn(List.of(tx));
+
+        int changed = service.reCategorizeAll(userId);
+
+        assertThat(changed).isEqualTo(1);
+        assertThat(tx.getCategoryId()).isEqualTo(7L);
     }
 }

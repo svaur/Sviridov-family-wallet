@@ -260,6 +260,7 @@ export function ImportPage() {
                 <tr>
                   <th>Дата</th>
                   <th>Операция</th>
+                  <th>Назначение платежа</th>
                   <th>Категория</th>
                   <th className="amount">Сумма</th>
                 </tr>
@@ -272,14 +273,8 @@ export function ImportPage() {
                       onClick={() => toggleRow(tx.rowNumber)}
                     >
                       <td>{fmtDate(tx.date)}</td>
-                      <td>
-                        <div>{tx.operation ?? '—'}</div>
-                        {tx.purpose && (
-                          <div className="muted tx-purpose" title={tx.purpose}>
-                            {tx.purpose}
-                          </div>
-                        )}
-                      </td>
+                      <td>{tx.operation ?? '—'}</td>
+                      <td className="muted" title={tx.purpose ?? undefined}>{tx.purpose ?? '—'}</td>
                       <td>
                         {tx.categoryName ? (
                           <span className="pill">
@@ -296,7 +291,7 @@ export function ImportPage() {
                     </tr>
                     {expandedRow === tx.rowNumber && (
                       <tr>
-                        <td colSpan={4}>
+                        <td colSpan={5}>
                           <div className="tx-actions">
                             <CategoryPicker
                               categories={categories}
@@ -333,7 +328,7 @@ export function ImportPage() {
                 ))}
                 {preview.transactions.length === 0 && (
                   <tr>
-                    <td colSpan={4}>Распознанных операций нет</td>
+                    <td colSpan={5}>Распознанных операций нет</td>
                   </tr>
                 )}
               </tbody>

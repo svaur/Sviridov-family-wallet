@@ -99,6 +99,22 @@ public class TransactionService {
         transactionRepository.save(tx);
     }
 
+    /** Sets (or clears, on blank) a free-text comment on a transaction. */
+    @Transactional
+    public TransactionResponse updateComment(Long userId, Long id, String comment) {
+        Transaction tx = transactionRepository.findByIdAndUserId(id, userId)
+                .orElseThrow(() -> new NotFoundException("Операция не найдена"));
+        if (tx.getDeletedAt() != null) {
+            throw new NotFoundException("Операция не найдена");
+        }
+        tx.setComment(comment == null || comment.isBlank() ? null : comment.trim());
+        tx = transactionRepository.save(tx);
+        String categoryName = tx.getCategoryId() == null
+                ? null
+                : categoryRepository.findById(tx.getCategoryId()).map(Category::getName).orElse(null);
+        return TransactionResponse.from(tx, categoryName);
+    }
+
     /**
      * Assigns a category to a transaction manually (bypassing rules). The
      * assignment is marked manual so re-running rules never overwrites it.

@@ -8,12 +8,14 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import ru.sviridov.wallet.security.AppUser;
 import ru.sviridov.wallet.service.TransactionService;
 import ru.sviridov.wallet.web.dto.CategoryAssignRequest;
+import ru.sviridov.wallet.web.dto.CommentRequest;
 import ru.sviridov.wallet.web.dto.TransactionRequest;
 import ru.sviridov.wallet.web.dto.TransactionResponse;
 
@@ -59,6 +61,14 @@ public class TransactionController {
     public ResponseEntity<TransactionResponse> markTransfer(@AuthenticationPrincipal AppUser user,
                                                             @PathVariable Long id) {
         TransactionResponse updated = transactionService.markTransfer(user.getId(), id);
+        return ResponseEntity.ok(updated);
+    }
+
+    @PutMapping("/{id}/comment")
+    public ResponseEntity<TransactionResponse> updateComment(@AuthenticationPrincipal AppUser user,
+                                                             @PathVariable Long id,
+                                                             @Valid @RequestBody CommentRequest request) {
+        TransactionResponse updated = transactionService.updateComment(user.getId(), id, request.comment());
         return ResponseEntity.ok(updated);
     }
 }

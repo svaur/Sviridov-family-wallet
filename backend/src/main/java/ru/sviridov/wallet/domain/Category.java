@@ -29,17 +29,25 @@ public class Category {
     @Column(nullable = false, length = 120)
     private String name;
 
+    @Column(nullable = false, length = 8)
+    private String icon;
+
     protected Category() {
     }
 
     public Category(Long userId, String name) {
-        this(userId, null, name);
+        this(userId, null, name, "📦");
     }
 
     public Category(Long userId, Long parentId, String name) {
+        this(userId, parentId, name, "📦");
+    }
+
+    public Category(Long userId, Long parentId, String name, String icon) {
         this.userId = userId;
         this.parentId = parentId;
         this.name = name;
+        this.icon = icon;
     }
 
     public Long getId() {
@@ -64,5 +72,13 @@ public class Category {
 
     public void setName(String name) {
         this.name = name;
+    }
+
+    public String getIcon() {
+        return icon;
+    }
+
+    public void setIcon(String icon) {
+        this.icon = icon;
     }
 }

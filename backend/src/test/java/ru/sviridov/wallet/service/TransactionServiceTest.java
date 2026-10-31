@@ -200,4 +200,20 @@ class TransactionServiceTest {
         assertThat(debit.isTransfer()).isTrue();
         assertThat(credit.isTransfer()).isTrue();
     }
+
+    @Test
+    void updateCommentSetsAndClearsComment() {
+        Long userId = 1L, txId = 5L;
+        Transaction tx = new Transaction(userId, 1L, null, LocalDate.of(2026, 10, 1),
+                "добавлено вручную", "Магазин", new BigDecimal("100.00"), "debit", null);
+        when(transactionRepository.findByIdAndUserId(txId, userId)).thenReturn(Optional.of(tx));
+
+        TransactionResponse resp = service.updateComment(userId, txId, "  Заметка  ");
+
+        assertThat(resp.comment()).isEqualTo("Заметка");
+        assertThat(tx.getComment()).isEqualTo("Заметка");
+
+        service.updateComment(userId, txId, "   ");
+        assertThat(tx.getComment()).isNull();
+    }
 }

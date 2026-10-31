@@ -4,12 +4,23 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import ru.sviridov.wallet.domain.Category;
 import ru.sviridov.wallet.domain.CategoryRepository;
+import ru.sviridov.wallet.web.BadRequestException;
 import ru.sviridov.wallet.web.NotFoundException;
 
 import java.util.List;
+import java.util.Set;
 
 @Service
 public class CategoryService {
+
+    private static final String DEFAULT_ICON = "📦";
+
+    private static final Set<String> ALLOWED_ICONS = Set.of(
+            "🏠", "💡", "🔧", "🛒", "☕",
+            "🚗", "⛽", "🚌", "✈️",
+            "💊", "⚕️", "🏋️", "💇",
+            "🧸", "🎬", "📚", "🎁", "🐾",
+            "💰", "🔄", "🧾", "📱", "📦");
 
     private final CategoryRepository categoryRepository;
     private final TransactionService transactionService;
@@ -25,18 +36,19 @@ public class CategoryService {
     }
 
     @Transactional
-    public Category create(Long userId, String name, Long parentId) {
+    public Category create(Long userId, String name, Long parentId, String icon) {
         validateParent(userId, parentId);
-        return categoryRepository.save(new Category(userId, parentId, name));
+        return categoryRepository.save(new Category(userId, parentId, name, resolveIcon(icon)));
     }
 
     @Transactional
-    public Category update(Long userId, Long id, String name, Long parentId) {
+    public Category update(Long userId, Long id, String name, Long parentId, String icon) {
         Category category = categoryRepository.findByIdAndUserId(id, userId)
                 .orElseThrow(() -> new NotFoundException("Категория не найдена"));
         validateParent(userId, parentId);
         category.setName(name);
         category.setParentId(parentId);
+        category.setIcon(resolveIcon(icon));
         return categoryRepository.save(category);
     }
 
@@ -55,5 +67,16 @@ public class CategoryService {
         if (parentId != null && categoryRepository.findByIdAndUserId(parentId, userId).isEmpty()) {
             throw new NotFoundException("Родительская категория не найдена");
         }
+    }
+
+    private String resolveIcon(String icon) {
+        if (icon == null || icon.isBlank()) {
+            return DEFAULT_ICON;
+        }
+        String trimmed = icon.trim();
+        if (!ALLOWED_ICONS.contains(trimmed)) {
+            throw new BadRequestException("Недопустимый значок категории");
+        }
+        return trimmed;
     }
 }

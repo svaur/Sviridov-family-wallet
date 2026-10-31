@@ -40,3 +40,11 @@ logging:
   level:
     root: INFO
     ru.sviridov.wallet: INFO
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    tags-sorter: alpha
+    operations-sorter: alpha
+  api-docs:
+    path: /v3/api-docs

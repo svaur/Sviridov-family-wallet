@@ -38,7 +38,7 @@ public class CategoryController {
     public ResponseEntity<CategoryResponse> create(@AuthenticationPrincipal AppUser user,
                                                    @Valid @RequestBody CategoryRequest request) {
         CategoryResponse response = CategoryResponse.from(
-                categoryService.create(user.getId(), request.name(), request.parentId()));
+                categoryService.create(user.getId(), request.name(), request.parentId(), request.icon()));
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
@@ -47,7 +47,7 @@ public class CategoryController {
                                    @PathVariable Long id,
                                    @Valid @RequestBody CategoryRequest request) {
         return CategoryResponse.from(
-                categoryService.update(user.getId(), id, request.name(), request.parentId()));
+                categoryService.update(user.getId(), id, request.name(), request.parentId(), request.icon()));
     }
 
     @DeleteMapping("/{id}")

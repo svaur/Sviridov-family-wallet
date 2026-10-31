@@ -198,6 +198,10 @@ public class Transaction {
         return comment;
     }
 
+    public void setComment(String comment) {
+        this.comment = comment;
+    }
+
     public String getFingerprint() {
         return fingerprint;
     }

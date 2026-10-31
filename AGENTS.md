@@ -10,7 +10,7 @@
 ## Stage gates
 
 - Proceed to the next implementation stage only after explicit user consent
-  (e.g. "приступай к этапу N"). After finishing a stage, pause and wait for the "go".
+  (e.g. "start stage N"). After finishing a stage, pause and wait for the "go".
 
 ## Security
 
@@ -19,5 +19,13 @@
 
 ## Other
 
-- Не используй термин MVP при работе над новыми частями и функциями проекта. У нас нет задачи проверять гипотезы и делать минимальные жизнеспособные версии — мы сразу работаем в парадигме «делаем правильно, надолго и архитектурно устойчиво». Наши компоненты готовы к масштабированию, учитывают вопросы безопасности, переиспользования в других участках системы. Во время проектирования мы стараемся не обрезать функционал, а, наоборот, думать на несколько шагов вперёд. В случае чего, я самостоятельно обозначу границы ближайшей реализуемой версии.
-- При разработке используй DRY-подход. Прежде чем разрабатывать новую функцию или придумывать новый стиль — обязательно убедись в том, что чего-то похожего уже нет в проекте. Do your very best to make code DRY.
+- Do not use the term MVP when working on new parts and features of the project.
+  We are not here to validate hypotheses or build minimal viable versions — we
+  work in a "build it right, for the long term, and architecturally stable"
+  paradigm. Components should be ready to scale, account for security, and be
+  reusable in other parts of the system. During design, do not cut functionality —
+  think several steps ahead. I will mark the boundaries of the nearest releasable
+  version myself.
+- Use the DRY approach. Before developing a new function or inventing a new
+  style, make sure nothing similar already exists in the project.
+- Keep it simple (KISS): do not over-complicate code without necessity.

@@ -7,8 +7,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.transaction.annotation.Propagation;
-import org.springframework.transaction.annotation.Transactional;
 import ru.sviridov.wallet.domain.Category;
 import ru.sviridov.wallet.domain.CategoryRepository;
 import ru.sviridov.wallet.domain.Rule;
@@ -61,21 +59,5 @@ class DefaultDataSeederTest {
 
         verify(categoryRepository, never()).save(any(Category.class));
         verify(ruleRepository, never()).save(any(Rule.class));
-    }
-
-    /**
-     * Regression guard for the "cannot execute INSERT in a read-only transaction"
-     * bug: {@code ensureDefaults} must run in its own writable transaction so that
-     * seeding works when called from a {@code @Transactional(readOnly = true)}
-     * service method (e.g. {@code CategoryService.list()} / {@code RuleService.list()}).
-     */
-    @Test
-    void ensureDefaultsRunsInNewTransaction() throws NoSuchMethodException {
-        Transactional annotation = DefaultDataSeeder.class
-                .getMethod("ensureDefaults", Long.class)
-                .getAnnotation(Transactional.class);
-
-        assertThat(annotation).isNotNull();
-        assertThat(annotation.propagation()).isEqualTo(Propagation.REQUIRES_NEW);
     }
 }

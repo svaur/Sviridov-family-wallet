@@ -1,13 +1,14 @@
 package ru.sviridov.wallet.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import ru.sviridov.wallet.domain.Card;
 import ru.sviridov.wallet.domain.CardRepository;
+import ru.sviridov.wallet.domain.RuleRepository;
 import ru.sviridov.wallet.domain.Statement;
 import ru.sviridov.wallet.domain.StatementRepository;
 import ru.sviridov.wallet.domain.TransactionRepository;
@@ -29,6 +30,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -43,14 +45,22 @@ class StatementServiceTest {
     @Mock
     private TransactionRepository transactionRepository;
     @Mock
+    private RuleRepository ruleRepository;
+    @Mock
     private StatementParser parser;
+    @Mock
+    private DefaultDataSeeder defaultDataSeeder;
 
-    @InjectMocks
     private StatementService service;
 
     @BeforeEach
-    void stubSave() {
+    void setUp() {
         lenient().when(statementRepository.save(any(Statement.class))).thenAnswer(inv -> inv.getArgument(0));
+        lenient().when(ruleRepository.findByUserIdOrderByPriorityDescIdAsc(anyLong())).thenReturn(List.of());
+        MerchantNormalizer normalizer = new MerchantNormalizer();
+        CategorizationEngine engine = new CategorizationEngine(new ObjectMapper(), normalizer);
+        service = new StatementService(cardRepository, statementRepository, transactionRepository,
+                ruleRepository, parser, normalizer, engine, defaultDataSeeder);
     }
 
     private static ParsedStatement statementOf(ParsedRow... rows) {

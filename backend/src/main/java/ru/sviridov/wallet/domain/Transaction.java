@@ -11,6 +11,13 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 
+/**
+ * A single operation row imported from a bank statement. {@code amount} holds
+ * the value of the filled column (Расход→debit, Приход→credit); the opposite
+ * column is always null. {@code fingerprint} is the SHA-256 dedup key; rows are
+ * soft-deleted via {@code deletedAt} (tombstone). {@code merchantNormalized} and
+ * {@code categoryId} are filled during import by the normalizer/categorizer.
+ */
 @Entity
 @Table(name = "transactions")
 public class Transaction {
@@ -129,6 +136,10 @@ public class Transaction {
         return merchantNormalized;
     }
 
+    public void setMerchantNormalized(String merchantNormalized) {
+        this.merchantNormalized = merchantNormalized;
+    }
+
     public BigDecimal getAmount() {
         return amount;
     }
@@ -139,6 +150,10 @@ public class Transaction {
 
     public Long getCategoryId() {
         return categoryId;
+    }
+
+    public void setCategoryId(Long categoryId) {
+        this.categoryId = categoryId;
     }
 
     public boolean isTransfer() {

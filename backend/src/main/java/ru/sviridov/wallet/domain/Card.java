@@ -9,6 +9,11 @@ import jakarta.persistence.Table;
 
 import java.time.Instant;
 
+/**
+ * A bank card owned by a user. Each card is an independent stream of statement
+ * imports. {@code last4} is used to reconcile the card against the card number
+ * extracted from an imported PDF.
+ */
 @Entity
 @Table(name = "cards")
 public class Card {

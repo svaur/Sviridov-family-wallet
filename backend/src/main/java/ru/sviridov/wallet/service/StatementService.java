@@ -4,6 +4,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import ru.sviridov.wallet.domain.Card;
 import ru.sviridov.wallet.domain.CardRepository;
+import ru.sviridov.wallet.domain.Rule;
+import ru.sviridov.wallet.domain.RuleRepository;
 import ru.sviridov.wallet.domain.Statement;
 import ru.sviridov.wallet.domain.StatementRepository;
 import ru.sviridov.wallet.domain.Transaction;
@@ -30,20 +32,31 @@ public class StatementService {
     private final CardRepository cardRepository;
     private final StatementRepository statementRepository;
     private final TransactionRepository transactionRepository;
+    private final RuleRepository ruleRepository;
     private final StatementParser parser;
+    private final MerchantNormalizer merchantNormalizer;
+    private final CategorizationEngine categorizationEngine;
+    private final DefaultDataSeeder defaultDataSeeder;
 
     public StatementService(CardRepository cardRepository, StatementRepository statementRepository,
-                            TransactionRepository transactionRepository, StatementParser parser) {
+                            TransactionRepository transactionRepository, RuleRepository ruleRepository,
+                            StatementParser parser, MerchantNormalizer merchantNormalizer,
+                            CategorizationEngine categorizationEngine, DefaultDataSeeder defaultDataSeeder) {
         this.cardRepository = cardRepository;
         this.statementRepository = statementRepository;
         this.transactionRepository = transactionRepository;
+        this.ruleRepository = ruleRepository;
         this.parser = parser;
+        this.merchantNormalizer = merchantNormalizer;
+        this.categorizationEngine = categorizationEngine;
+        this.defaultDataSeeder = defaultDataSeeder;
     }
 
     /**
      * Parses and imports a statement PDF for a card. Persists the import fact
      * (statements row) plus the non-duplicate transactions; the PDF bytes are
-     * never stored. Returns counts, warnings and unrecognised rows.
+     * never stored. Normalises the merchant and auto-categorises each row.
+     * Returns counts, warnings and unrecognised rows.
      */
     @Transactional
     public StatementImportResponse importStatement(Long userId, Long cardId, byte[] pdfBytes) {
@@ -104,6 +117,10 @@ public class StatementService {
                 ? Set.of()
                 : transactionRepository.findExistingFingerprints(fingerprints);
 
+        // Seed default categories/rules on the very first import, then classify.
+        defaultDataSeeder.ensureDefaults(userId);
+        List<Rule> rules = ruleRepository.findByUserIdOrderByPriorityDescIdAsc(userId);
+
         int skippedDuplicates = 0;
         List<Transaction> toSave = new ArrayList<>();
         for (ParsedRow row : validRows) {
@@ -112,8 +129,11 @@ public class StatementService {
                 skippedDuplicates++;
                 continue;
             }
-            toSave.add(new Transaction(userId, cardId, row.rowNumber(), row.date(), row.operation(),
-                    row.purpose(), row.amount(), row.type(), fp));
+            Transaction tx = new Transaction(userId, cardId, row.rowNumber(), row.date(), row.operation(),
+                    row.purpose(), row.amount(), row.type(), fp);
+            tx.setMerchantNormalized(merchantNormalizer.normalize(merchantSource(row)));
+            tx.setCategoryId(categorizationEngine.categorize(tx, rules));
+            toSave.add(tx);
         }
 
         String status = unrecognized.isEmpty() ? "OK" : "PARTIAL";
@@ -136,6 +156,11 @@ public class StatementService {
         cardRepository.findByIdAndUserId(cardId, userId)
                 .orElseThrow(() -> new NotFoundException("Карта не найдена"));
         return statementRepository.findByCardIdOrderByIdDesc(cardId);
+    }
+
+    /** Counterparty name lives in the payment purpose; fall back to the operation. */
+    private static String merchantSource(ParsedRow row) {
+        return row.purpose() != null && !row.purpose().isBlank() ? row.purpose() : row.operation();
     }
 
     private static String last4(String cardNumber) {

@@ -87,6 +87,14 @@ input:focus {
   border-color: #2563eb;
 }
 
+select {
+  padding: 0.5rem 0.65rem;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 1rem;
+  background: #fff;
+}
+
 button {
   padding: 0.5rem 0.9rem;
   border: 1px solid #2563eb;
@@ -196,4 +204,16 @@ button:disabled {
 .import-result ul {
   padding-left: 0;
   margin: 0;
+}
+
+.amount-debit {
+  color: #b91c1c;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.amount-credit {
+  color: #15803d;
+  text-align: right;
+  white-space: nowrap;
 }

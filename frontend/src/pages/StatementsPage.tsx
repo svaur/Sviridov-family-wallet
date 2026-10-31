@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api, HttpError } from '../api'
 import { useAuth } from '../auth/AuthContext'
+import { fmtDate, fmtInstant } from '../format'
 
 interface Card {
   id: number
@@ -35,16 +36,6 @@ interface ImportResult {
   skippedDuplicates: number
   warnings: string[]
   unrecognizedRows: string[]
-}
-
-function fmtDate(d: string | null) {
-  if (!d) return '—'
-  const [y, m, dd] = d.split('-')
-  return dd && m && y ? `${dd}.${m}.${y}` : d
-}
-
-function fmtInstant(iso: string) {
-  return new Date(iso).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' })
 }
 
 export function StatementsPage() {

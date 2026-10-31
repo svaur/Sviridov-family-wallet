@@ -9,6 +9,11 @@ import jakarta.persistence.Table;
 
 import java.time.Instant;
 
+/**
+ * Application user. Contains only credentials: {@code username} (login) and
+ * {@code passwordHash} (BCrypt), plus the {@code createdAt} timestamp. Users
+ * are created manually (bootstrap env var or SQL); there is no self-registration.
+ */
 @Entity
 @Table(name = "users")
 public class User {

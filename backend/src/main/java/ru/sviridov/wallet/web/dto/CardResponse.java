@@ -6,8 +6,8 @@ import java.time.Instant;
 
 public record CardResponse(
         Long id,
+        String cardNumber,
         String displayName,
-        String bank,
         String last4,
         String currency,
         boolean archived,
@@ -16,8 +16,8 @@ public record CardResponse(
     public static CardResponse from(Card card) {
         return new CardResponse(
                 card.getId(),
+                card.getCardNumber(),
                 card.getDisplayName(),
-                card.getBank(),
                 card.getLast4(),
                 card.getCurrency(),
                 card.isArchived(),

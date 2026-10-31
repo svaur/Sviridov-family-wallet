@@ -4,8 +4,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import ru.sviridov.wallet.domain.Card;
 import ru.sviridov.wallet.domain.CardRepository;
+import ru.sviridov.wallet.web.BadRequestException;
 import ru.sviridov.wallet.web.NotFoundException;
-import ru.sviridov.wallet.web.dto.CardRequest;
 
 import java.util.List;
 
@@ -29,31 +29,25 @@ public class CardService {
                 .orElseThrow(() -> new NotFoundException("Карта не найдена"));
     }
 
+    /**
+     * Finds the user's card by the full masked card number extracted from a
+     * statement, or creates it if it does not exist yet. This is the only way
+     * cards come into existence — there is no manual card CRUD.
+     */
     @Transactional
-    public Card create(Long userId, CardRequest request) {
-        Card card = new Card(userId, request.displayName(), request.bank(), request.last4(), request.currency());
-        return cardRepository.save(card);
+    public Card findOrCreateByNumber(Long userId, String cardNumber) {
+        String number = cardNumber == null ? null : cardNumber.trim();
+        if (number == null || number.isBlank()) {
+            throw new BadRequestException("В выписке не найден номер карты");
+        }
+        return cardRepository.findByUserIdAndCardNumber(userId, number)
+                .orElseGet(() -> cardRepository.save(new Card(userId, number, null)));
     }
 
     @Transactional
-    public Card update(Long userId, Long cardId, CardRequest request) {
+    public Card rename(Long userId, Long cardId, String displayName) {
         Card card = get(userId, cardId);
-        card.setDisplayName(request.displayName());
-        card.setBank(request.bank());
-        card.setLast4(request.last4());
-        if (request.currency() != null && !request.currency().isBlank()) {
-            card.setCurrency(request.currency().trim().toUpperCase());
-        }
-        if (request.archived() != null) {
-            card.setArchived(request.archived());
-        }
-        return cardRepository.save(card);
-    }
-
-    @Transactional
-    public Card archive(Long userId, Long cardId) {
-        Card card = get(userId, cardId);
-        card.setArchived(true);
+        card.setDisplayName(displayName);
         return cardRepository.save(card);
     }
 }

@@ -65,7 +65,7 @@ class TransactionServiceTest {
     void createCardSourceSetsSourceAndCard() {
         Long userId = 1L, cardId = 10L;
         when(cardRepository.findByIdAndUserId(cardId, userId))
-                .thenReturn(Optional.of(new Card(userId, "Main", "Bank", "1234", "RUB")));
+                .thenReturn(Optional.of(new Card(userId, "2202XXXXXXXX1234", "Main")));
 
         TransactionResponse resp = service.create(userId, request("card", cardId));
 

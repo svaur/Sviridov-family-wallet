@@ -10,9 +10,10 @@ import jakarta.persistence.Table;
 import java.time.Instant;
 
 /**
- * A bank card owned by a user. Each card is an independent stream of statement
- * imports. {@code last4} is used to reconcile the card against the card number
- * extracted from an imported PDF.
+ * A bank card owned by a user. Cards are created automatically when a statement
+ * is imported: the full masked {@code cardNumber} extracted from the PDF is the
+ * natural identity, and {@code last4} is derived from it for display. Users can
+ * rename the card's display name but do not manage cards manually.
  */
 @Entity
 @Table(name = "cards")
@@ -28,8 +29,8 @@ public class Card {
     @Column(name = "display_name", nullable = false, length = 120)
     private String displayName;
 
-    @Column(length = 120)
-    private String bank;
+    @Column(name = "card_number", length = 20)
+    private String cardNumber;
 
     @Column(length = 4)
     private String last4;
@@ -46,12 +47,14 @@ public class Card {
     protected Card() {
     }
 
-    public Card(Long userId, String displayName, String bank, String last4, String currency) {
+    public Card(Long userId, String cardNumber, String displayName) {
         this.userId = userId;
-        this.displayName = displayName;
-        this.bank = bank;
-        this.last4 = last4;
-        this.currency = (currency == null || currency.isBlank()) ? "RUB" : currency.trim().toUpperCase();
+        this.cardNumber = cardNumber;
+        this.last4 = last4(cardNumber);
+        this.displayName = (displayName == null || displayName.isBlank())
+                ? "Карта ****" + this.last4
+                : displayName.trim();
+        this.currency = "RUB";
         this.archived = false;
         this.createdAt = Instant.now();
     }
@@ -72,39 +75,28 @@ public class Card {
         this.displayName = displayName;
     }
 
-    public String getBank() {
-        return bank;
-    }
-
-    public void setBank(String bank) {
-        this.bank = bank;
+    public String getCardNumber() {
+        return cardNumber;
     }
 
     public String getLast4() {
         return last4;
     }
 
-    public void setLast4(String last4) {
-        this.last4 = last4;
-    }
-
     public String getCurrency() {
         return currency;
-    }
-
-    public void setCurrency(String currency) {
-        this.currency = currency;
     }
 
     public boolean isArchived() {
         return archived;
     }
 
-    public void setArchived(boolean archived) {
-        this.archived = archived;
-    }
-
     public Instant getCreatedAt() {
         return createdAt;
+    }
+
+    private static String last4(String cardNumber) {
+        String digits = cardNumber == null ? "" : cardNumber.replaceAll("\\D", "");
+        return digits.length() >= 4 ? digits.substring(digits.length() - 4) : digits;
     }
 }

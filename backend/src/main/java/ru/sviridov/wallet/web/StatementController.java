@@ -21,7 +21,7 @@ import java.io.IOException;
 import java.util.List;
 
 @RestController
-@RequestMapping("/api/cards/{cardId}/statements")
+@RequestMapping("/api/statements")
 public class StatementController {
 
     private static final long MAX_BYTES = 10L * 1024 * 1024;
@@ -36,55 +36,48 @@ public class StatementController {
     @PostMapping("/preview")
     public StatementPreviewResponse preview(
             @AuthenticationPrincipal AppUser user,
-            @PathVariable Long cardId,
             @RequestParam("file") MultipartFile file) {
-        return statementService.preview(user.getId(), cardId, readBytes(file));
+        return statementService.preview(user.getId(), readBytes(file));
     }
 
     /** Step 2: re-apply the current rules to the draft. */
     @PostMapping("/preview/{draftId}/recategorize")
     public StatementPreviewResponse recategorize(
             @AuthenticationPrincipal AppUser user,
-            @PathVariable Long cardId,
             @PathVariable String draftId) {
-        return statementService.recategorize(user.getId(), cardId, draftId);
+        return statementService.recategorize(user.getId(), draftId);
     }
 
     /** Step 2: remove one transaction from the draft. */
     @DeleteMapping("/preview/{draftId}/transactions/{rowNumber}")
     public StatementPreviewResponse removeTransaction(
             @AuthenticationPrincipal AppUser user,
-            @PathVariable Long cardId,
             @PathVariable String draftId,
             @PathVariable int rowNumber) {
-        return statementService.removeTransaction(user.getId(), cardId, draftId, rowNumber);
+        return statementService.removeTransaction(user.getId(), draftId, rowNumber);
     }
 
     /** Step 2: assign a category manually to one transaction in the draft. */
     @PostMapping("/preview/{draftId}/transactions/{rowNumber}/category")
     public StatementPreviewResponse assignDraftCategory(
             @AuthenticationPrincipal AppUser user,
-            @PathVariable Long cardId,
             @PathVariable String draftId,
             @PathVariable int rowNumber,
             @RequestBody CategoryAssignRequest request) {
-        return statementService.assignDraftCategory(user.getId(), cardId, draftId, rowNumber, request.categoryId());
+        return statementService.assignDraftCategory(user.getId(), draftId, rowNumber, request.categoryId());
     }
 
     /** Step 3: import the draft and return the final result. */
     @PostMapping("/preview/{draftId}/confirm")
     public StatementImportResponse confirm(
             @AuthenticationPrincipal AppUser user,
-            @PathVariable Long cardId,
             @PathVariable String draftId) {
-        return statementService.confirm(user.getId(), cardId, draftId);
+        return statementService.confirm(user.getId(), draftId);
     }
 
     @GetMapping
-    public List<StatementResponse> list(
-            @AuthenticationPrincipal AppUser user,
-            @PathVariable Long cardId) {
-        return statementService.listForCard(user.getId(), cardId).stream()
+    public List<StatementResponse> list(@AuthenticationPrincipal AppUser user) {
+        return statementService.listAll(user.getId()).stream()
                 .map(StatementResponse::from)
                 .toList();
     }

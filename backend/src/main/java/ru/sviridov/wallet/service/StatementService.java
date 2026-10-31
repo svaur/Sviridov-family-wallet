@@ -3,7 +3,6 @@ package ru.sviridov.wallet.service;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import ru.sviridov.wallet.domain.Card;
-import ru.sviridov.wallet.domain.CardRepository;
 import ru.sviridov.wallet.domain.Category;
 import ru.sviridov.wallet.domain.CategoryRepository;
 import ru.sviridov.wallet.domain.Rule;
@@ -17,7 +16,6 @@ import ru.sviridov.wallet.parser.ParsedStatement;
 import ru.sviridov.wallet.parser.StatementParseException;
 import ru.sviridov.wallet.parser.StatementParser;
 import ru.sviridov.wallet.web.BadRequestException;
-import ru.sviridov.wallet.web.CardMismatchException;
 import ru.sviridov.wallet.web.NotFoundException;
 import ru.sviridov.wallet.web.dto.StatementImportResponse;
 import ru.sviridov.wallet.web.dto.StatementPreviewResponse;
@@ -35,7 +33,7 @@ import java.util.stream.Collectors;
 @Service
 public class StatementService {
 
-    private final CardRepository cardRepository;
+    private final CardService cardService;
     private final StatementRepository statementRepository;
     private final TransactionRepository transactionRepository;
     private final RuleRepository ruleRepository;
@@ -44,11 +42,11 @@ public class StatementService {
     private final CategorizationEngine categorizationEngine;
     private final StatementDraftStore draftStore;
 
-    public StatementService(CardRepository cardRepository, StatementRepository statementRepository,
+    public StatementService(CardService cardService, StatementRepository statementRepository,
                             TransactionRepository transactionRepository, RuleRepository ruleRepository,
                             CategoryRepository categoryRepository, StatementParser parser,
                             CategorizationEngine categorizationEngine, StatementDraftStore draftStore) {
-        this.cardRepository = cardRepository;
+        this.cardService = cardService;
         this.statementRepository = statementRepository;
         this.transactionRepository = transactionRepository;
         this.ruleRepository = ruleRepository;
@@ -60,18 +58,18 @@ public class StatementService {
 
     /**
      * Step 1 of the upload wizard: parse, validate and categorise the PDF
-     * without persisting anything, and keep the result as a draft for the next
-     * steps. Returns the preview keyed by {@code draftId}.
+     * without persisting transactions, and keep the result as a draft. The card
+     * is created automatically from the number extracted from the PDF header.
      */
-    public StatementPreviewResponse preview(Long userId, Long cardId, byte[] pdfBytes) {
-        StatementDraft draft = prepare(userId, cardId, pdfBytes);
+    public StatementPreviewResponse preview(Long userId, byte[] pdfBytes) {
+        StatementDraft draft = prepare(userId, pdfBytes);
         String draftId = draftStore.put(draft);
         return toPreview(draftId, draft, countDuplicates(draft.transactions()));
     }
 
     /** Step 2: re-run categorisation over the draft using the current rule set. */
-    public StatementPreviewResponse recategorize(Long userId, Long cardId, String draftId) {
-        StatementDraft draft = getDraft(userId, cardId, draftId);
+    public StatementPreviewResponse recategorize(Long userId, String draftId) {
+        StatementDraft draft = getDraft(userId, draftId);
         List<Rule> rules = ruleRepository.findByUserIdOrderByPriorityDescIdAsc(userId);
         for (Transaction tx : draft.transactions()) {
             if (!tx.isCategoryManual()) {
@@ -82,8 +80,8 @@ public class StatementService {
     }
 
     /** Step 2: remove one transaction from the draft (it will not be imported). */
-    public StatementPreviewResponse removeTransaction(Long userId, Long cardId, String draftId, int rowNumber) {
-        StatementDraft draft = getDraft(userId, cardId, draftId);
+    public StatementPreviewResponse removeTransaction(Long userId, String draftId, int rowNumber) {
+        StatementDraft draft = getDraft(userId, draftId);
         List<Transaction> kept = draft.transactions().stream()
                 .filter(tx -> tx.getRowNumber() == null || tx.getRowNumber() != rowNumber)
                 .collect(Collectors.toCollection(ArrayList::new));
@@ -95,9 +93,9 @@ public class StatementService {
     }
 
     /** Step 2: assign a category manually to one transaction in the draft. */
-    public StatementPreviewResponse assignDraftCategory(Long userId, Long cardId, String draftId, int rowNumber,
+    public StatementPreviewResponse assignDraftCategory(Long userId, String draftId, int rowNumber,
                                                         Long categoryId) {
-        StatementDraft draft = getDraft(userId, cardId, draftId);
+        StatementDraft draft = getDraft(userId, draftId);
         categoryRepository.findByIdAndUserId(categoryId, userId)
                 .orElseThrow(() -> new NotFoundException("Категория не найдена"));
         Transaction tx = draft.transactions().stream()
@@ -111,8 +109,8 @@ public class StatementService {
 
     /** Step 3: dedup and persist the draft, then discard it. */
     @Transactional
-    public StatementImportResponse confirm(Long userId, Long cardId, String draftId) {
-        StatementDraft draft = getDraft(userId, cardId, draftId);
+    public StatementImportResponse confirm(Long userId, String draftId) {
+        StatementDraft draft = getDraft(userId, draftId);
 
         List<String> fingerprints = draft.transactions().stream()
                 .map(Transaction::getFingerprint)
@@ -149,22 +147,21 @@ public class StatementService {
     }
 
     @Transactional(readOnly = true)
-    public List<Statement> listForCard(Long userId, Long cardId) {
-        cardRepository.findByIdAndUserId(cardId, userId)
-                .orElseThrow(() -> new NotFoundException("Карта не найдена"));
-        return statementRepository.findByCardIdOrderByIdDesc(cardId);
+    public List<Statement> listAll(Long userId) {
+        return statementRepository.findByUserIdOrderByIdDesc(userId);
     }
 
-    private StatementDraft prepare(Long userId, Long cardId, byte[] pdfBytes) {
-        Card card = cardRepository.findByIdAndUserId(cardId, userId)
-                .orElseThrow(() -> new NotFoundException("Карта не найдена"));
-
+    private StatementDraft prepare(Long userId, byte[] pdfBytes) {
         ParsedStatement parsed;
         try {
             parsed = parser.parse(pdfBytes);
         } catch (StatementParseException e) {
             throw new BadRequestException("Не удалось распознать выписку: " + e.getMessage());
         }
+
+        // The card is created automatically from the extracted card number.
+        Card card = cardService.findOrCreateByNumber(userId, parsed.cardNumber());
+        Long cardId = card.getId();
 
         List<String> warnings = new ArrayList<>();
         List<String> unrecognized = new ArrayList<>(parsed.unrecognizedRows());
@@ -187,15 +184,6 @@ public class StatementService {
             }
             prevRowNumber = row.rowNumber();
             validRows.add(row);
-        }
-
-        // Card reconciliation — hard error: block the import on mismatch.
-        if (card.getLast4() != null && !card.getLast4().isBlank()
-                && parsed.cardNumber() != null && !parsed.cardNumber().isBlank()) {
-            String extractedLast4 = last4(parsed.cardNumber());
-            if (!card.getLast4().equals(extractedLast4)) {
-                throw new CardMismatchException(extractedLast4, card.getLast4());
-            }
         }
 
         // Period overlap with an already imported statement (warning only).
@@ -221,9 +209,9 @@ public class StatementService {
                 validRows.size(), transactions, warnings, unrecognized, Instant.now());
     }
 
-    private StatementDraft getDraft(Long userId, Long cardId, String draftId) {
+    private StatementDraft getDraft(Long userId, String draftId) {
         StatementDraft draft = draftStore.get(draftId);
-        if (draft == null || !draft.userId().equals(userId) || !draft.cardId().equals(cardId)) {
+        if (draft == null || !draft.userId().equals(userId)) {
             throw new NotFoundException("Черновик не найден или устарел");
         }
         return draft;
@@ -251,11 +239,6 @@ public class StatementService {
         return new StatementPreviewResponse(draftId, draft.periodFrom(), draft.periodTo(),
                 draft.cardNumber(), draft.contract(), draft.account(), draft.rowCountRaw(),
                 draft.validCount(), skippedDuplicates, draft.warnings(), draft.unrecognizedRows(), previewTxns);
-    }
-
-    private static String last4(String cardNumber) {
-        String digits = cardNumber == null ? "" : cardNumber.replaceAll("\\D", "");
-        return digits.length() >= 4 ? digits.substring(digits.length() - 4) : digits;
     }
 
     private static String fingerprint(Long userId, Long cardId, ParsedRow row) {

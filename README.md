@@ -3,37 +3,48 @@
 Self-hosted personal/family finance tracker built on PDF bank statements.
 
 **Stack:** Java 21 · Spring Boot 3 (web, data-jpa, validation, security, actuator) · Flyway · PostgreSQL ·
-Apache PDFBox · React + TypeScript + Vite · React Router · Recharts.
+Apache PDFBox · springdoc-openapi (Swagger UI) · React + TypeScript + Vite · React Router · Recharts · nginx.
 
 ## Repository layout
 
 ```
 backend/            Spring Boot 3 single-module app (Maven)
-frontend/           React + TypeScript + Vite SPA
-docker-compose.yml  postgres + backend
+frontend/           React + TypeScript + Vite SPA (built and served by nginx)
+docker-compose.yml  postgres + backend + frontend (nginx)
 .env.example        env template (copy to .env)
 ```
 
 ## Prerequisites
 
-- Java 21 (JDK)
-- Maven 3.9+
-- Docker + Docker Compose
-- Node.js 20+ and pnpm (for the frontend)
+- Docker + Docker Compose — all you need for the containerised run.
+- Local development only: Java 21, Maven 3.9+, Node.js 22.5+ and pnpm 11.
+  (pnpm 11 uses Node's built-in `node:sqlite`, which requires Node ≥ 22.5.)
 
-## Run (development)
+## Build & run (Docker)
 
 1. `cp .env.example .env` and set real passwords (Postgres + bootstrap user).
-2. `docker compose up --build` — starts PostgreSQL and the backend on `:8080`.
+2. `docker compose up --build`
+   - builds and starts three containers:
+     - **frontend** (nginx) on `:80` — serves the SPA and proxies `/api`, `/actuator`,
+       `/swagger-ui`, `/v3/api-docs` to the backend
+     - **backend** (Spring Boot) on `:8080`
+     - **postgres** on `:5432`
+   - App: `http://localhost` · Swagger UI: `http://localhost/swagger-ui.html`
    - Health: `GET http://localhost:8080/actuator/health`
-   - On first start, Flyway creates the full schema (V1–V8).
-   - If `BOOTSTRAP_USERNAME` / `BOOTSTRAP_PASSWORD` are set, the first user is created automatically.
-3. Frontend (separate terminal):
-   ```bash
-   cd frontend
-   pnpm install
-   pnpm dev          # http://localhost:5173, proxies /api and /actuator to :8080
-   ```
+   - On first start, Flyway creates the full schema (V1–V9); if `BOOTSTRAP_USERNAME` /
+     `BOOTSTRAP_PASSWORD` are set, the first user is created automatically.
+3. Rebuild after changes: `docker compose up --build --force-recreate`.
+4. Stop: `docker compose down` (add `-v` to also wipe the database volume).
+
+## Run (development, hot reload)
+
+- Backend: `cd backend && mvn spring-boot:run` (needs a running Postgres).
+- Frontend:
+  ```bash
+  cd frontend
+  pnpm install
+  pnpm dev          # http://localhost:5173, proxies /api and /actuator to :8080
+  ```
 
 ## Auth
 
@@ -78,9 +89,13 @@ Transactions:
 - `DELETE /api/transactions/{id}` — soft-delete
 - `POST /api/transactions/{id}/category` — assign category manually
 - `POST /api/transactions/{id}/transfer` — mark as transfer (excluded from stats)
+- `PUT /api/transactions/{id}/comment` — set/clear the manual comment
 
 Analytics:
 - `GET /api/analytics?from=&to=&exclude=1,2,3` — KPI + monthly + per-category (excludes transfers & excluded)
+
+OpenAPI docs are generated at `GET /v3/api-docs` with Swagger UI at `/swagger-ui.html`.
+Login is rate-limited: 5 failed attempts per username+IP within 5 minutes → `429`.
 
 ## Roadmap
 
@@ -91,8 +106,24 @@ Analytics:
 - Stage 4 (done): dashboard + server-side analytics (`GET /api/analytics`) + category filter.
 - Stage 5 (done): transfers (is_transfer + pairing heuristic) + gap detection.
 - Stage 6 (done): frontend UX/design rework (sidebar app shell).
-- Stage 7: production readiness (nginx/TLS, JSON logs, OpenAPI, rate-limit).
+- Stage 7 (partly done): nginx reverse proxy (no TLS yet), OpenAPI/Swagger, login rate-limit — done;
+  TLS, JSON logs and production hardening — pending (see checklist below).
 - Stage 8 (optional): notifications center, rule learning, mobile app.
+
+## Production checklist (remaining Stage 7)
+
+Deferred on purpose — add when going live:
+
+1. **TLS on nginx.** Either a self-signed cert (browser warning, fine for a closed family VPS) or a real
+   one (Let's Encrypt via `certbot`, needs a domain name + port 80 reachable). Then set `COOKIE_SECURE=true`
+   and redirect HTTP→HTTPS in `frontend/nginx.conf`.
+2. **JSON logs.** Switch the backend to `logback-spring.xml` with a `JsonEncoder` (structured
+   `timestamp/level/logger/message`); keep console output for local dev.
+3. **Production hardening.**
+   - `restart: unless-stopped` on all services.
+   - Stop publishing `postgres:5432` and `backend:8080` to the host — reach them only through nginx.
+   - Run containers as non-root users; drop `BOOTSTRAP_*` after the first user is created.
+4. **Backups.** A cron `pg_dump` of the `postgres` volume with rotation (e.g. keep 14 daily dumps).
 
 ## Notes
 

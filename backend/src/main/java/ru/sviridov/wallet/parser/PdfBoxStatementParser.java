@@ -45,6 +45,8 @@ public class PdfBoxStatementParser implements StatementParser {
     private static final Pattern P_MONEY = Pattern.compile("^\\d+(?:[.,]\\d{2})$");
     private static final float COLUMN_TOLERANCE = 60f;
     private static final float LINE_TOLERANCE = 5f;
+    private static final float ROW_NUMBER_TOLERANCE = 30f;
+    private static final float PURPOSE_TOLERANCE = 15f;
 
     @Override
     public String version() {
@@ -65,16 +67,24 @@ public class PdfBoxStatementParser implements StatementParser {
             List<Token> tokens = extractTokens(doc);
             Float expenseX = null;
             Float incomeX = null;
+            Float numberX = null;
+            Float purposeX = null;
             for (Token t : tokens) {
                 if (expenseX == null && "Расход".equals(t.text())) {
                     expenseX = t.x();
                 } else if (incomeX == null && "Приход".equals(t.text())) {
                     incomeX = t.x();
+                } else if (numberX == null && "Номер".equals(t.text())) {
+                    numberX = t.x();
+                } else if (purposeX == null && "Назначение".equals(t.text())) {
+                    purposeX = t.x();
                 }
             }
             if (expenseX == null || incomeX == null) {
                 throw new StatementParseException("Не найдены колонки «Расход»/«Приход» в таблице выписки");
             }
+            float rowNumberColumn = numberX != null ? numberX : 68f;
+            float purposeColumn = purposeX != null ? purposeX : expenseX + 256f;
 
             List<ParsedRow> rows = new ArrayList<>();
             List<String> unrecognized = new ArrayList<>();
@@ -85,16 +95,33 @@ public class PdfBoxStatementParser implements StatementParser {
                 }
                 line.sort(Comparator.comparingDouble(Token::x));
                 Token first = line.get(0);
-                if (!P_ROW_NUM.matcher(first.text()).matches()) {
-                    continue; // header, footer or signature line
+                boolean isRowStart = P_ROW_NUM.matcher(first.text()).matches()
+                        && Math.abs(first.x() - rowNumberColumn) <= ROW_NUMBER_TOLERANCE;
+                if (isRowStart) {
+                    rowCountRaw++;
+                    ParsedRow row = parseRow(line, expenseX, incomeX);
+                    if (row == null) {
+                        unrecognized.add("Строка " + first.text());
+                    } else {
+                        rows.add(row);
+                    }
+                } else if (!rows.isEmpty() && isPurposeContinuation(line, purposeColumn)) {
+                    // Wrapped "Назначение платежа" continuation of the previous row.
+                    ParsedRow prev = rows.remove(rows.size() - 1);
+                    StringBuilder extra = new StringBuilder();
+                    for (Token t : line) {
+                        if (extra.length() > 0) {
+                            extra.append(' ');
+                        }
+                        extra.append(t.text());
+                    }
+                    String purpose = prev.purpose() == null || prev.purpose().isBlank()
+                            ? extra.toString()
+                            : prev.purpose() + " " + extra;
+                    rows.add(new ParsedRow(prev.rowNumber(), prev.date(), prev.operation(),
+                            prev.expense(), prev.income(), purpose));
                 }
-                rowCountRaw++;
-                ParsedRow row = parseRow(line, expenseX, incomeX);
-                if (row == null) {
-                    unrecognized.add("Строка " + first.text());
-                } else {
-                    rows.add(row);
-                }
+                // else: header, footer or signature line — ignore
             }
 
             return new ParsedStatement(periodFrom, periodTo, cardNumber, contract, account,
@@ -175,6 +202,20 @@ public class PdfBoxStatementParser implements StatementParser {
         }
 
         return new ParsedRow(rowNumber, date, operation.toString(), expense, income, purpose.toString());
+    }
+
+    /**
+     * True when every token of the line sits in the "Назначение платежа" column
+     * (to the right of {@code purposeColumn}), i.e. it is a wrapped continuation
+     * of the previous row's purpose rather than a standalone row/header/footer.
+     */
+    private static boolean isPurposeContinuation(List<Token> line, float purposeColumn) {
+        for (Token t : line) {
+            if (t.x() < purposeColumn - PURPOSE_TOLERANCE) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static String extractText(PDDocument doc) throws IOException {

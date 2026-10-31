@@ -97,4 +97,23 @@ class PdfBoxStatementParserTest {
             assertThat(row.purpose()).doesNotContain("Карта:");
         });
     }
+
+    @Test
+    void joinsMultiLinePurpose() throws Exception {
+        ParsedStatement s = parser.parse(loadMultiPageFixture());
+
+        // The fixture wraps the transfer "Назначение платежа" across two lines:
+        //   "Платеж Между своими счетами на сумму 7200,00 RUR."
+        //   "Куда: 40817810000000007777 Без налога (НДС)."
+        // The parser must join them into a single purpose (previously only the
+        // first line was captured).
+        ParsedRow transfer = s.rows().stream()
+                .filter(r -> "credit".equals(r.type()))
+                .findFirst()
+                .orElseThrow();
+
+        assertThat(transfer.operation()).isEqualTo("Перевод средств");
+        assertThat(transfer.purpose()).isEqualTo(
+                "Платеж Между своими счетами на сумму 7200,00 RUR. Куда: 40817810000000007777 Без налога (НДС).");
+    }
 }

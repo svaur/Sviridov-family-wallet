@@ -59,8 +59,8 @@ public class DefaultDataSeeder {
 
     private void addContainsRules(Long userId, Long categoryId, String... keywords) {
         for (String keyword : keywords) {
-            ruleRepository.save(new Rule(userId, Rule.TYPE_MERCHANT_CONTAINS,
-                    json(Map.of(Rule.KEY_VALUE, keyword)), categoryId, 0, false));
+            ruleRepository.save(new Rule(userId,
+                    json(Map.of(Rule.KEY_MERCHANT_CONTAINS, keyword)), categoryId, 0, false));
         }
     }
 

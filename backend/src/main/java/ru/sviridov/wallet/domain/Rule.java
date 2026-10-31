@@ -11,24 +11,22 @@ import org.hibernate.type.SqlTypes;
 
 /**
  * A categorization rule owned by a user (or auto-learned). Applied in priority
- * order (desc), first match wins. {@code params} is a JSON object (jsonb) whose
- * shape depends on {@code type}: merchant_contains→{value}, merchant_regex→{pattern},
- * amount_range→{min,max}, day_of_month→{day}.
+ * order (descending), first match wins. {@code params} is a flat JSON object
+ * (jsonb) of optional condition keys; a rule matches iff EVERY present condition
+ * matches (implicit AND). Supported keys: {@code merchant_contains},
+ * {@code merchant_regex}, {@code min}, {@code max}, {@code day_from},
+ * {@code day_to}.
  */
 @Entity
 @Table(name = "rules")
 public class Rule {
 
-    public static final String TYPE_MERCHANT_CONTAINS = "merchant_contains";
-    public static final String TYPE_MERCHANT_REGEX = "merchant_regex";
-    public static final String TYPE_AMOUNT_RANGE = "amount_range";
-    public static final String TYPE_DAY_OF_MONTH = "day_of_month";
-
-    public static final String KEY_VALUE = "value";
-    public static final String KEY_PATTERN = "pattern";
+    public static final String KEY_MERCHANT_CONTAINS = "merchant_contains";
+    public static final String KEY_MERCHANT_REGEX = "merchant_regex";
     public static final String KEY_MIN = "min";
     public static final String KEY_MAX = "max";
-    public static final String KEY_DAY = "day";
+    public static final String KEY_DAY_FROM = "day_from";
+    public static final String KEY_DAY_TO = "day_to";
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -37,10 +35,7 @@ public class Rule {
     @Column(name = "user_id", nullable = false)
     private Long userId;
 
-    @Column(nullable = false, length = 40)
-    private String type;
-
-    /** JSON object whose shape depends on {@link #type}; stored as jsonb. */
+    /** Flat JSON object of optional conditions; stored as jsonb. */
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(nullable = false, columnDefinition = "jsonb")
     private String params;
@@ -57,9 +52,8 @@ public class Rule {
     protected Rule() {
     }
 
-    public Rule(Long userId, String type, String params, Long categoryId, Integer priority, boolean autoLearned) {
+    public Rule(Long userId, String params, Long categoryId, Integer priority, boolean autoLearned) {
         this.userId = userId;
-        this.type = type;
         this.params = params;
         this.categoryId = categoryId;
         this.priority = priority == null ? 0 : priority;
@@ -72,14 +66,6 @@ public class Rule {
 
     public Long getUserId() {
         return userId;
-    }
-
-    public String getType() {
-        return type;
-    }
-
-    public void setType(String type) {
-        this.type = type;
     }
 
     public String getParams() {

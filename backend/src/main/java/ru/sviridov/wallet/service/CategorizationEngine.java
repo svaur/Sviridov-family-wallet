@@ -17,6 +17,9 @@ import java.util.regex.PatternSyntaxException;
  * given (by convention: priority descending, then id ascending) and the first
  * match wins. Returns the matched category id, or {@code null} when no rule
  * matched (the transaction stays UNCATEGORIZED).
+ *
+ * <p>A rule's {@code params} is a flat object of optional conditions; the rule
+ * matches iff every present condition matches.</p>
  */
 @Service
 public class CategorizationEngine {
@@ -40,13 +43,64 @@ public class CategorizationEngine {
 
     private boolean matches(Rule rule, Transaction tx) {
         Map<String, Object> params = parseParams(rule.getParams());
-        return switch (rule.getType()) {
-            case Rule.TYPE_MERCHANT_CONTAINS -> merchantContains(params, tx);
-            case Rule.TYPE_MERCHANT_REGEX -> merchantRegex(params, tx);
-            case Rule.TYPE_AMOUNT_RANGE -> amountRange(params, tx);
-            case Rule.TYPE_DAY_OF_MONTH -> dayOfMonth(params, tx);
-            default -> false;
-        };
+        if (params.isEmpty()) {
+            return false;
+        }
+
+        String merchant = tx.getMerchantNormalized();
+
+        if (params.containsKey(Rule.KEY_MERCHANT_CONTAINS)) {
+            String needle = merchantNormalizer.normalizeCore(asString(params.get(Rule.KEY_MERCHANT_CONTAINS)));
+            if (merchant == null || needle == null || !merchant.contains(needle)) {
+                return false;
+            }
+        }
+
+        if (params.containsKey(Rule.KEY_MERCHANT_REGEX)) {
+            String pattern = asString(params.get(Rule.KEY_MERCHANT_REGEX));
+            if (merchant == null || pattern == null || pattern.isBlank()) {
+                return false;
+            }
+            try {
+                if (!Pattern.compile(pattern, Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE)
+                        .matcher(merchant)
+                        .find()) {
+                    return false;
+                }
+            } catch (PatternSyntaxException e) {
+                return false;
+            }
+        }
+
+        BigDecimal amount = tx.getAmount();
+        if (params.containsKey(Rule.KEY_MIN)) {
+            BigDecimal min = asDecimal(params.get(Rule.KEY_MIN));
+            if (amount == null || min == null || amount.compareTo(min) < 0) {
+                return false;
+            }
+        }
+        if (params.containsKey(Rule.KEY_MAX)) {
+            BigDecimal max = asDecimal(params.get(Rule.KEY_MAX));
+            if (amount == null || max == null || amount.compareTo(max) > 0) {
+                return false;
+            }
+        }
+
+        Integer day = tx.getDate() == null ? null : tx.getDate().getDayOfMonth();
+        if (params.containsKey(Rule.KEY_DAY_FROM)) {
+            Integer from = asInteger(params.get(Rule.KEY_DAY_FROM));
+            if (day == null || from == null || day < from) {
+                return false;
+            }
+        }
+        if (params.containsKey(Rule.KEY_DAY_TO)) {
+            Integer to = asInteger(params.get(Rule.KEY_DAY_TO));
+            if (day == null || to == null || day > to) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private Map<String, Object> parseParams(String params) {
@@ -59,48 +113,6 @@ public class CategorizationEngine {
         } catch (Exception e) {
             return Map.of();
         }
-    }
-
-    private boolean merchantContains(Map<String, Object> params, Transaction tx) {
-        if (tx.getMerchantNormalized() == null) {
-            return false;
-        }
-        String needle = merchantNormalizer.normalizeCore(asString(params.get(Rule.KEY_VALUE)));
-        return needle != null && tx.getMerchantNormalized().contains(needle);
-    }
-
-    private boolean merchantRegex(Map<String, Object> params, Transaction tx) {
-        String pattern = asString(params.get(Rule.KEY_PATTERN));
-        if (pattern == null || pattern.isBlank() || tx.getMerchantNormalized() == null) {
-            return false;
-        }
-        try {
-            return Pattern.compile(pattern, Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE)
-                    .matcher(tx.getMerchantNormalized())
-                    .find();
-        } catch (PatternSyntaxException e) {
-            return false;
-        }
-    }
-
-    private boolean amountRange(Map<String, Object> params, Transaction tx) {
-        BigDecimal min = asDecimal(params.get(Rule.KEY_MIN));
-        BigDecimal max = asDecimal(params.get(Rule.KEY_MAX));
-        if (min == null && max == null) {
-            return false;
-        }
-        if (tx.getAmount() == null) {
-            return false;
-        }
-        if (min != null && tx.getAmount().compareTo(min) < 0) {
-            return false;
-        }
-        return max == null || tx.getAmount().compareTo(max) <= 0;
-    }
-
-    private boolean dayOfMonth(Map<String, Object> params, Transaction tx) {
-        Integer day = asInteger(params.get(Rule.KEY_DAY));
-        return day != null && tx.getDate() != null && tx.getDate().getDayOfMonth() == day;
     }
 
     private static String asString(Object value) {

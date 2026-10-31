@@ -16,6 +16,7 @@ import java.math.BigDecimal;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 
@@ -24,6 +25,10 @@ public class RuleService {
 
     /** User-authored rules override built-in defaults (which use priority 0). */
     private static final int DEFAULT_USER_PRIORITY = 100;
+
+    private static final Set<String> KNOWN_KEYS = Set.of(
+            Rule.KEY_MERCHANT_CONTAINS, Rule.KEY_MERCHANT_REGEX,
+            Rule.KEY_MIN, Rule.KEY_MAX, Rule.KEY_DAY_FROM, Rule.KEY_DAY_TO);
 
     private final RuleRepository ruleRepository;
     private final CategoryRepository categoryRepository;
@@ -55,7 +60,7 @@ public class RuleService {
         validateCategory(userId, request.categoryId());
         String params = normalizeParams(request);
         int priority = request.priority() == null ? DEFAULT_USER_PRIORITY : request.priority();
-        Rule rule = ruleRepository.save(new Rule(userId, request.type(), params, request.categoryId(), priority, false));
+        Rule rule = ruleRepository.save(new Rule(userId, params, request.categoryId(), priority, false));
         transactionService.reCategorizeAll(userId);
         return RuleResponse.from(rule, objectMapper);
     }
@@ -66,7 +71,6 @@ public class RuleService {
                 .orElseThrow(() -> new NotFoundException("Правило не найдено"));
         validateCategory(userId, request.categoryId());
         String params = normalizeParams(request);
-        rule.setType(request.type());
         rule.setParams(params);
         rule.setCategoryId(request.categoryId());
         rule.setPriority(request.priority() == null ? DEFAULT_USER_PRIORITY : request.priority());
@@ -90,76 +94,111 @@ public class RuleService {
         }
     }
 
-    /** Validates per-type params and returns the canonical JSON to persist. */
+    /** Validates the flat condition object and returns the canonical JSON to persist. */
     private String normalizeParams(RuleRequest request) {
-        Map<String, Object> params = request.params() == null ? Map.of() : request.params();
-        return switch (request.type()) {
-            case Rule.TYPE_MERCHANT_CONTAINS -> {
-                String value = requiredString(params, Rule.KEY_VALUE, "merchant_contains");
-                yield json(Map.of(Rule.KEY_VALUE, value));
+        Map<String, Object> in = request.params() == null ? Map.of() : request.params();
+        for (String key : in.keySet()) {
+            if (!KNOWN_KEYS.contains(key)) {
+                throw new BadRequestException("Неизвестное условие правила: " + key);
             }
-            case Rule.TYPE_MERCHANT_REGEX -> {
-                String pattern = requiredString(params, Rule.KEY_PATTERN, "merchant_regex");
-                try {
-                    Pattern.compile(pattern);
-                } catch (PatternSyntaxException e) {
-                    throw new BadRequestException("Некорректное регулярное выражение: " + e.getMessage());
-                }
-                yield json(Map.of(Rule.KEY_PATTERN, pattern));
-            }
-            case Rule.TYPE_AMOUNT_RANGE -> {
-                BigDecimal min = optionalDecimal(params, Rule.KEY_MIN);
-                BigDecimal max = optionalDecimal(params, Rule.KEY_MAX);
-                if (min == null && max == null) {
-                    throw new BadRequestException("Для правила 'amount_range' укажите 'min' и/или 'max'");
-                }
-                Map<String, Object> range = new LinkedHashMap<>();
-                if (min != null) {
-                    range.put(Rule.KEY_MIN, min);
-                }
-                if (max != null) {
-                    range.put(Rule.KEY_MAX, max);
-                }
-                yield json(range);
-            }
-            case Rule.TYPE_DAY_OF_MONTH -> {
-                Integer day = optionalInteger(params, Rule.KEY_DAY);
-                if (day == null || day < 1 || day > 31) {
-                    throw new BadRequestException("Для правила 'day_of_month' укажите 'day' от 1 до 31");
-                }
-                yield json(Map.of(Rule.KEY_DAY, day));
-            }
-            default -> throw new BadRequestException("Неизвестный тип правила: " + request.type());
-        };
-    }
-
-    private String requiredString(Map<String, Object> params, String key, String type) {
-        Object value = params.get(key);
-        if (value == null || String.valueOf(value).isBlank()) {
-            throw new BadRequestException("Для правила '" + type + "' укажите '" + key + "'");
         }
-        return String.valueOf(value).trim();
+
+        Map<String, Object> out = new LinkedHashMap<>();
+
+        if (in.containsKey(Rule.KEY_MERCHANT_CONTAINS)) {
+            String value = optionalString(in, Rule.KEY_MERCHANT_CONTAINS);
+            if (value == null) {
+                throw new BadRequestException("Условие 'merchant_contains' не может быть пустым");
+            }
+            out.put(Rule.KEY_MERCHANT_CONTAINS, value);
+        }
+
+        if (in.containsKey(Rule.KEY_MERCHANT_REGEX)) {
+            String pattern = optionalString(in, Rule.KEY_MERCHANT_REGEX);
+            if (pattern == null) {
+                throw new BadRequestException("Условие 'merchant_regex' не может быть пустым");
+            }
+            try {
+                Pattern.compile(pattern);
+            } catch (PatternSyntaxException e) {
+                throw new BadRequestException("Некорректное регулярное выражение: " + e.getMessage());
+            }
+            out.put(Rule.KEY_MERCHANT_REGEX, pattern);
+        }
+
+        BigDecimal min = null;
+        BigDecimal max = null;
+        if (in.containsKey(Rule.KEY_MIN)) {
+            min = requiredDecimal(in, Rule.KEY_MIN);
+            if (min.signum() < 0) {
+                throw new BadRequestException("'min' не может быть отрицательным");
+            }
+            out.put(Rule.KEY_MIN, min);
+        }
+        if (in.containsKey(Rule.KEY_MAX)) {
+            max = requiredDecimal(in, Rule.KEY_MAX);
+            if (max.signum() < 0) {
+                throw new BadRequestException("'max' не может быть отрицательным");
+            }
+            out.put(Rule.KEY_MAX, max);
+        }
+        if (min != null && max != null && min.compareTo(max) > 0) {
+            throw new BadRequestException("'min' не может быть больше 'max'");
+        }
+
+        Integer dayFrom = null;
+        Integer dayTo = null;
+        if (in.containsKey(Rule.KEY_DAY_FROM)) {
+            dayFrom = requiredDay(in, Rule.KEY_DAY_FROM);
+            out.put(Rule.KEY_DAY_FROM, dayFrom);
+        }
+        if (in.containsKey(Rule.KEY_DAY_TO)) {
+            dayTo = requiredDay(in, Rule.KEY_DAY_TO);
+            out.put(Rule.KEY_DAY_TO, dayTo);
+        }
+        if (dayFrom != null && dayTo != null && dayFrom > dayTo) {
+            throw new BadRequestException("'day_from' не может быть больше 'day_to'");
+        }
+
+        if (out.isEmpty()) {
+            throw new BadRequestException("Задайте хотя бы одно условие правила");
+        }
+
+        return json(out);
     }
 
-    private BigDecimal optionalDecimal(Map<String, Object> params, String key) {
+    private String optionalString(Map<String, Object> params, String key) {
         Object value = params.get(key);
         if (value == null) {
             return null;
         }
+        String s = String.valueOf(value).trim();
+        return s.isEmpty() ? null : s;
+    }
+
+    private BigDecimal requiredDecimal(Map<String, Object> params, String key) {
+        Object value = params.get(key);
+        if (value == null) {
+            throw new BadRequestException("Укажите значение '" + key + "'");
+        }
         try {
-            return new BigDecimal(String.valueOf(value));
+            return new BigDecimal(String.valueOf(value).trim());
         } catch (NumberFormatException e) {
             throw new BadRequestException("Некорректное число в '" + key + "'");
         }
     }
 
-    private Integer optionalInteger(Map<String, Object> params, String key) {
+    private Integer requiredDay(Map<String, Object> params, String key) {
         Object value = params.get(key);
         if (value == null) {
-            return null;
+            throw new BadRequestException("Укажите значение '" + key + "'");
         }
         try {
-            return new BigDecimal(String.valueOf(value)).intValueExact();
+            int day = new BigDecimal(String.valueOf(value).trim()).intValueExact();
+            if (day < 1 || day > 31) {
+                throw new BadRequestException("'" + key + "' должен быть от 1 до 31");
+            }
+            return day;
         } catch (NumberFormatException | ArithmeticException e) {
             throw new BadRequestException("Некорректное целое число в '" + key + "'");
         }

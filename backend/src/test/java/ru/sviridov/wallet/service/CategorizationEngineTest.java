@@ -19,34 +19,52 @@ class CategorizationEngineTest {
 
     @Test
     void merchantContainsMatchesNormalizedMerchant() {
-        Rule rule = rule(Rule.TYPE_MERCHANT_CONTAINS, "{\"value\":\"MIR KORMA\"}", 10L);
+        Rule rule = rule("{\"merchant_contains\":\"MIR KORMA\"}", 10L);
         assertThat(engine.categorize(tx("ОПЛАТА MIR KORMA"), List.of(rule))).isEqualTo(10L);
     }
 
     @Test
     void merchantRegexMatchesCaseInsensitive() {
-        Rule rule = rule(Rule.TYPE_MERCHANT_REGEX, "{\"pattern\":\"korma\"}", 20L);
+        Rule rule = rule("{\"merchant_regex\":\"korma\"}", 20L);
         assertThat(engine.categorize(tx("MIR KORMA"), List.of(rule))).isEqualTo(20L);
     }
 
     @Test
     void amountRangeIsInclusive() {
-        Rule rule = rule(Rule.TYPE_AMOUNT_RANGE, "{\"min\":100,\"max\":500}", 30L);
+        Rule rule = rule("{\"min\":100,\"max\":500}", 30L);
         assertThat(engine.categorize(tx("x", "500.00"), List.of(rule))).isEqualTo(30L);
         assertThat(engine.categorize(tx("x", "500.01"), List.of(rule))).isNull();
     }
 
     @Test
-    void dayOfMonthMatches() {
-        Rule rule = rule(Rule.TYPE_DAY_OF_MONTH, "{\"day\":15}", 40L);
+    void minOnlyMatches() {
+        Rule rule = rule("{\"min\":100}", 31L);
+        assertThat(engine.categorize(tx("x", "99.99"), List.of(rule))).isNull();
+        assertThat(engine.categorize(tx("x", "100.00"), List.of(rule))).isEqualTo(31L);
+    }
+
+    @Test
+    void dayRangeMatches() {
+        Rule rule = rule("{\"day_from\":15,\"day_to\":20}", 40L);
         assertThat(engine.categorize(tx("x", "10.00", LocalDate.of(2026, 1, 15)), List.of(rule))).isEqualTo(40L);
-        assertThat(engine.categorize(tx("x", "10.00", LocalDate.of(2026, 1, 16)), List.of(rule))).isNull();
+        assertThat(engine.categorize(tx("x", "10.00", LocalDate.of(2026, 1, 20)), List.of(rule))).isEqualTo(40L);
+        assertThat(engine.categorize(tx("x", "10.00", LocalDate.of(2026, 1, 14)), List.of(rule))).isNull();
+        assertThat(engine.categorize(tx("x", "10.00", LocalDate.of(2026, 1, 21)), List.of(rule))).isNull();
+    }
+
+    @Test
+    void combinedConditionsMatchAll() {
+        // amount 5000-10000 AND day 15-20 (the motivating example)
+        Rule rule = rule("{\"min\":5000,\"max\":10000,\"day_from\":15,\"day_to\":20}", 50L);
+        assertThat(engine.categorize(tx("x", "7000.00", LocalDate.of(2026, 1, 17)), List.of(rule))).isEqualTo(50L);
+        assertThat(engine.categorize(tx("x", "7000.00", LocalDate.of(2026, 1, 10)), List.of(rule))).isNull();
+        assertThat(engine.categorize(tx("x", "12000.00", LocalDate.of(2026, 1, 17)), List.of(rule))).isNull();
     }
 
     @Test
     void firstMatchWinsInGivenOrder() {
-        Rule first = rule(Rule.TYPE_MERCHANT_CONTAINS, "{\"value\":\"korma\"}", 1L);
-        Rule second = rule(Rule.TYPE_MERCHANT_CONTAINS, "{\"value\":\"korma\"}", 2L);
+        Rule first = rule("{\"merchant_contains\":\"korma\"}", 1L);
+        Rule second = rule("{\"merchant_contains\":\"korma\"}", 2L);
         assertThat(engine.categorize(tx("korma"), List.of(first, second))).isEqualTo(1L);
     }
 
@@ -56,13 +74,19 @@ class CategorizationEngineTest {
     }
 
     @Test
-    void invalidRegexIsSkipped() {
-        Rule rule = rule(Rule.TYPE_MERCHANT_REGEX, "{\"pattern\":\"[\"}", 50L);
+    void emptyParamsNeverMatches() {
+        Rule rule = rule("{}", 60L);
         assertThat(engine.categorize(tx("korma"), List.of(rule))).isNull();
     }
 
-    private Rule rule(String type, String params, Long categoryId) {
-        return new Rule(1L, type, params, categoryId, 0, false);
+    @Test
+    void invalidRegexIsSkipped() {
+        Rule rule = rule("{\"merchant_regex\":\"[\"}", 70L);
+        assertThat(engine.categorize(tx("korma"), List.of(rule))).isNull();
+    }
+
+    private Rule rule(String params, Long categoryId) {
+        return new Rule(1L, params, categoryId, 0, false);
     }
 
     private Transaction tx(String merchant) {

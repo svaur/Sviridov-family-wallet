@@ -68,7 +68,7 @@ All errors share one shape:
 - Stage 0 (done): skeleton + infra.
 - Stage 1 (done): auth + full schema + cards CRUD.
 - Stage 2 (done): PDF parser (PDFBox) + statement upload + validation + dedup.
-- Stage 3 (next): merchant normalization + categorization (default + user rules, priority).
+- Stage 3 (done): merchant normalization + categorization (default + user rules, priority; flexible flat-condition rules with implicit AND).
 - Stage 4: dashboard + analytics (`GET /api/analytics`).
 - Stage 5: transaction editing + learning.
 - Stage 6: gaps + transfers + notifications.

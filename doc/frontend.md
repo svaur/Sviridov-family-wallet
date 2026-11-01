@@ -32,7 +32,7 @@ production.
 
 | Page | What it does |
 |---|---|
-| `DashboardPage` | period picker "с"/"по" (two `<input type="date">`, default trailing 30 days; drives every widget); 4 stat cards (Доход/Расход/Баланс/Карты) with trends vs the previous period of the same length; Recharts AreaChart (monthly, zero-filled); top-categories bars; "Самые крупные покупки" (debits, non-excluded, in period, sorted desc, top 5) with inline comment editing; category-exclude checkboxes (querystring `?exclude=`) |
+| `DashboardPage` | period picker "с"/"по" (two `<input type="date">`, default trailing 30 days; drives every widget); 4 stat cards (Доход/Расход/Баланс/Карты) with trends vs the previous period of the same length; Recharts donut PieChart of expense categories (top 5 + "Прочее"); top-categories bars; "Самые крупные покупки" (debits, non-excluded, in period, sorted desc, top 5) with inline comment editing; category-exclude checkboxes (querystring `?exclude=`) |
 | `TransactionsPage` | feed with client-side filters (search/type/category/source); category pill with icon; "исключено" (muted) when the category is the system excluded one; expanded row: CategoryPicker, edit rule, delete; "+ Добавить операцию" manual form (hidden behind a button) |
 | `StatementsPage` | "+ Загрузить выписку" / "+ Загрузить скрин ленты"; upload-history table with inline card rename, status badges, delete statement (hard delete); "Пропуски в выписках" table |
 | `CardsPage` | card CRUD: list (номер/название/валюта/дата), "+ Добавить карту", inline edit form (number + name), delete with a confirm that warns about the cascade |

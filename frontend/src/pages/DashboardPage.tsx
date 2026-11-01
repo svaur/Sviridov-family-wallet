@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
-  Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis,
+  Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip,
 } from 'recharts'
 import { api, HttpError } from '../api'
 import { CommentField } from '../components/CommentField'
@@ -75,12 +75,6 @@ function defaultRange(): { from: string; to: string } {
   const now = new Date()
   const start = new Date(now.getTime() - 29 * DAY_MS)
   return { from: iso(start), to: iso(now) }
-}
-
-function shortMonth(month: string): string {
-  const [y, m] = month.split('-')
-  const names = ['Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн', 'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек']
-  return `${names[Number(m) - 1]} ${y.slice(2)}`
 }
 
 /** The period of the same length immediately before [from, to]. */
@@ -181,11 +175,18 @@ export function DashboardPage() {
     if (value) load(from, value, excluded)
   }
 
-  const monthly = (data?.monthly ?? []).map((p) => ({
-    month: shortMonth(p.month),
-    income: p.income,
-    expense: p.expense,
-  }))
+  // Pie slices: top 5 expense categories plus an aggregated "everything else".
+  const pieData = useMemo(() => {
+    const cats = data?.categories ?? []
+    const slices = cats.slice(0, 5).map((c, i) => ({
+      name: c.categoryName,
+      value: c.amount,
+      color: CAT_COLORS[i % CAT_COLORS.length],
+    }))
+    const rest = cats.slice(5).reduce((sum, c) => sum + c.amount, 0)
+    if (rest > 0) slices.push({ name: 'Прочее', value: rest, color: '#cbd5e1' })
+    return slices
+  }, [data])
 
   const income = data?.income ?? 0
   const expense = data?.expense ?? 0
@@ -272,27 +273,31 @@ export function DashboardPage() {
 
           <div className="grid">
             <section className="card">
-              <h2>Динамика за период</h2>
-              <ResponsiveContainer width="100%" height={260}>
-                <AreaChart data={monthly}>
-                  <defs>
-                    <linearGradient id="incGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0" stopColor="#6366f1" stopOpacity={0.25} />
-                      <stop offset="1" stopColor="#6366f1" stopOpacity={0} />
-                    </linearGradient>
-                    <linearGradient id="expGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0" stopColor="#a855f7" stopOpacity={0.2} />
-                      <stop offset="1" stopColor="#a855f7" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#eef0f6" />
-                  <XAxis dataKey="month" />
-                  <YAxis />
-                  <Tooltip formatter={(value) => fmtMoney(Number(value))} />
-                  <Area type="monotone" dataKey="income" name="Доход" stroke="#6366f1" fill="url(#incGrad)" strokeWidth={2.5} />
-                  <Area type="monotone" dataKey="expense" name="Расход" stroke="#a855f7" fill="url(#expGrad)" strokeWidth={2.5} />
-                </AreaChart>
-              </ResponsiveContainer>
+              <h2>Структура расходов</h2>
+              {pieData.length === 0 ? (
+                <p className="muted">Нет расходов за период</p>
+              ) : (
+                <ResponsiveContainer width="100%" height={260}>
+                  <PieChart>
+                    <Pie
+                      data={pieData}
+                      dataKey="value"
+                      nameKey="name"
+                      innerRadius={50}
+                      outerRadius={85}
+                      paddingAngle={2}
+                      cx="42%"
+                      cy="50%"
+                    >
+                      {pieData.map((d) => (
+                        <Cell key={d.name} fill={d.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip formatter={(value) => fmtMoney(Number(value))} />
+                    <Legend layout="vertical" align="right" verticalAlign="middle" iconType="circle" />
+                  </PieChart>
+                </ResponsiveContainer>
+              )}
             </section>
 
             <section className="card">

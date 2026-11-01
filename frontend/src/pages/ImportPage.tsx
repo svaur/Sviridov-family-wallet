@@ -53,6 +53,8 @@ function last4(cardNumber: string | null): string | null {
   return digits.length >= 4 ? digits.slice(-4) : digits
 }
 
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+
 function accountShort(account: string | null): string | null {
   if (!account) return null
   if (account.length <= 12) return account
@@ -103,6 +105,10 @@ export function ImportPage() {
     setError(null)
     if (!file) {
       setError('Выберите файл')
+      return
+    }
+    if (file.size > MAX_UPLOAD_BYTES) {
+      setError('Файл больше 10 МБ — уменьшите его или загрузите другой')
       return
     }
     setLoading(true)

@@ -4,6 +4,7 @@ import { Layout } from './components/Layout'
 import { RequireAuth } from './components/RequireAuth'
 import { DashboardPage } from './pages/DashboardPage'
 import { CardsPage } from './pages/CardsPage'
+import { ForcePasswordChangePage } from './pages/ForcePasswordChangePage'
 import { ImportPage } from './pages/ImportPage'
 import { LoginPage } from './pages/LoginPage'
 import { RulesPage } from './pages/RulesPage'
@@ -16,6 +17,14 @@ export default function App() {
     <AuthProvider>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        <Route
+          path="/change-password"
+          element={
+            <RequireAuth>
+              <ForcePasswordChangePage />
+            </RequireAuth>
+          }
+        />
         <Route
           path="/"
           element={

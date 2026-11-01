@@ -8,5 +8,9 @@ export function RequireAuth({ children }: { children: ReactNode }) {
 
   if (loading) return <div className="page">Загрузка…</div>
   if (!user) return <Navigate to="/login" state={{ from: location }} replace />
+  // The admin reset the password: lock every screen until a new one is set.
+  if (user.mustChangePassword && location.pathname !== '/change-password') {
+    return <Navigate to="/change-password" replace />
+  }
   return <>{children}</>
 }

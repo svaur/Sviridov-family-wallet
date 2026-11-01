@@ -6,6 +6,8 @@ export interface User {
   username: string
   firstName: string | null
   lastName: string | null
+  /** True right after the admin reset the password — the app is locked until a new one is set. */
+  mustChangePassword: boolean
 }
 
 interface AuthContextValue {

@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import ru.sviridov.wallet.domain.Card;
@@ -13,9 +14,12 @@ import ru.sviridov.wallet.domain.Rule;
 import ru.sviridov.wallet.domain.RuleRepository;
 import ru.sviridov.wallet.domain.Statement;
 import ru.sviridov.wallet.domain.StatementRepository;
+import ru.sviridov.wallet.domain.Transaction;
 import ru.sviridov.wallet.domain.TransactionRepository;
 import ru.sviridov.wallet.parser.ParsedRow;
 import ru.sviridov.wallet.parser.ParsedStatement;
+import ru.sviridov.wallet.parser.PdfBoxStatementParser;
+import ru.sviridov.wallet.parser.ScreenshotParser;
 import ru.sviridov.wallet.parser.StatementParser;
 import ru.sviridov.wallet.web.dto.StatementImportResponse;
 import ru.sviridov.wallet.web.dto.StatementPreviewResponse;
@@ -52,7 +56,9 @@ class StatementServiceTest {
     @Mock
     private CategoryRepository categoryRepository;
     @Mock
-    private StatementParser parser;
+    private PdfBoxStatementParser parser;
+    @Mock
+    private ScreenshotParser screenshotParser;
     @Mock
     private StatementGapService statementGapService;
 
@@ -63,11 +69,14 @@ class StatementServiceTest {
         lenient().when(statementRepository.save(any(Statement.class))).thenAnswer(inv -> inv.getArgument(0));
         lenient().when(ruleRepository.findByUserIdOrderByPriorityDescIdAsc(anyLong())).thenReturn(List.of());
         lenient().when(categoryRepository.findByUserIdOrderByNameAsc(anyLong())).thenReturn(List.of());
-        lenient().when(cardService.findOrCreateByNumber(anyLong(), anyString()))
-                .thenAnswer(inv -> new Card(inv.getArgument(0), inv.getArgument(1), "Main"));
+        Card resolvedCard = mock(Card.class);
+        lenient().when(resolvedCard.getId()).thenReturn(5L);
+        lenient().when(cardService.findOrCreateByNumberOrNull(anyLong(), anyString()))
+                .thenReturn(resolvedCard);
         CategorizationEngine engine = new CategorizationEngine(new ObjectMapper(), new TextNormalizer());
         service = new StatementService(cardService, statementRepository, transactionRepository,
-                ruleRepository, categoryRepository, parser, engine, new StatementDraftStore(), statementGapService);
+                ruleRepository, categoryRepository, parser, screenshotParser, engine,
+                new StatementDraftStore(), statementGapService);
     }
 
     private static ParsedStatement statementOf(ParsedRow... rows) {
@@ -84,7 +93,7 @@ class StatementServiceTest {
 
     private StatementPreviewResponse doPreview(Long userId, ParsedStatement parsed) throws Exception {
         when(parser.parse(any(byte[].class))).thenReturn(parsed);
-        return service.preview(userId, new byte[]{1});
+        return service.preview(userId, new byte[]{1}, false);
     }
 
     @Test
@@ -94,7 +103,32 @@ class StatementServiceTest {
 
         doPreview(userId, parsed);
 
-        verify(cardService).findOrCreateByNumber(userId, "2202XXXXXXXX1234");
+        verify(cardService).findOrCreateByNumberOrNull(userId, "2202XXXXXXXX1234");
+    }
+
+    @Test
+    void confirmAcceptsManuallyEnteredCardNumber() throws Exception {
+        Long userId = 1L;
+        ParsedStatement parsed = new ParsedStatement(
+                LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 30),
+                null, "1234567890", "40817810000000000000",
+                1, List.of(debit(1, "2026-09-05", "100.00", "Магазин А")), List.of());
+
+        // The parser found no card number: the preview still works, card-less.
+        StatementPreviewResponse preview = doPreview(userId, parsed);
+        assertThat(preview.cardNumber()).isNull();
+        assertThat(preview.transactions()).hasSize(1);
+
+        when(cardService.findOrCreateByNumber(userId, "2202XXXXXXXX9999")).thenAnswer(inv -> {
+            Card manualCard = mock(Card.class);
+            when(manualCard.getId()).thenReturn(9L);
+            return manualCard;
+        });
+
+        StatementImportResponse resp = service.confirm(userId, preview.draftId(), "2202XXXXXXXX9999");
+
+        assertThat(resp.importedCount()).isEqualTo(1);
+        verify(cardService).findOrCreateByNumber(userId, "2202XXXXXXXX9999");
     }
 
     @Test
@@ -114,7 +148,7 @@ class StatementServiceTest {
         assertThat(preview.transactions()).hasSize(2);
         assertThat(preview.skippedDuplicates()).isEqualTo(1);
 
-        StatementImportResponse resp = service.confirm(userId, preview.draftId());
+        StatementImportResponse resp = service.confirm(userId, preview.draftId(), null);
 
         assertThat(resp.importedCount()).isEqualTo(1);
         assertThat(resp.skippedDuplicates()).isEqualTo(1);
@@ -202,5 +236,88 @@ class StatementServiceTest {
 
         StatementPreviewResponse re = service.recategorize(userId, preview.draftId());
         assertThat(re.transactions().get(0).categoryId()).isEqualTo(5L);
+    }
+
+    @Test
+    void editDraftTransactionUpdatesOperationAmountAndDate() throws Exception {
+        Long userId = 1L;
+        ParsedStatement parsed = statementOf(debit(1, "2026-09-05", "100.00", "Магазин А"));
+
+        StatementPreviewResponse preview = doPreview(userId, parsed);
+        assertThat(preview.transactions().get(0).operation()).isEqualTo("Магазин А");
+
+        StatementPreviewResponse edited = service.editDraftTransaction(
+                userId, preview.draftId(), 1, "Новое имя", new BigDecimal("150.50"),
+                LocalDate.of(2026, 9, 6));
+
+        assertThat(edited.transactions()).hasSize(1);
+        assertThat(edited.transactions().get(0).operation()).isEqualTo("Новое имя");
+        assertThat(edited.transactions().get(0).amount()).isEqualByComparingTo("150.50");
+        assertThat(edited.transactions().get(0).date()).isEqualTo(LocalDate.of(2026, 9, 6));
+    }
+
+    @Test
+    void addDraftTransactionAddsStatementRow() throws Exception {
+        Long userId = 1L;
+        ParsedStatement parsed = statementOf(debit(1, "2026-09-05", "100.00", "Магазин А"));
+
+        StatementPreviewResponse preview = doPreview(userId, parsed);
+        assertThat(preview.validCount()).isEqualTo(1);
+
+        StatementPreviewResponse added = service.addDraftTransaction(
+                userId, preview.draftId(), "Новая операция", new BigDecimal("250.00"), "credit",
+                LocalDate.of(2026, 9, 7));
+
+        assertThat(added.validCount()).isEqualTo(2);
+        assertThat(added.transactions()).hasSize(2);
+        assertThat(added.transactions().get(1).operation()).isEqualTo("Новая операция");
+        assertThat(added.transactions().get(1).amount()).isEqualByComparingTo("250.00");
+        assertThat(added.transactions().get(1).type()).isEqualTo("credit");
+        assertThat(added.transactions().get(1).date()).isEqualTo(LocalDate.of(2026, 9, 7));
+    }
+
+    @Test
+    void deleteStatementHardDeletesItsTransactionsAndRemovesStatement() {
+        Long userId = 1L;
+        Long statementId = 42L;
+        Long cardId = 7L;
+
+        Statement statement = mock(Statement.class);
+        when(statement.getCardId()).thenReturn(cardId);
+        when(statementRepository.findById(statementId)).thenReturn(Optional.of(statement));
+        when(cardService.get(userId, cardId)).thenReturn(mock(Card.class));
+
+        Transaction tx1 = new Transaction(userId, cardId, 1, LocalDate.of(2026, 9, 5), "A", "p",
+                new BigDecimal("10.00"), "debit", "fp1");
+        Transaction tx2 = new Transaction(userId, cardId, 2, LocalDate.of(2026, 9, 6), "B", "p",
+                new BigDecimal("20.00"), "debit", "fp2");
+        when(transactionRepository.findByStatementId(statementId)).thenReturn(List.of(tx1, tx2));
+
+        int deleted = service.deleteStatement(userId, statementId);
+
+        assertThat(deleted).isEqualTo(2);
+        verify(transactionRepository).deleteAll(List.of(tx1, tx2));
+        verify(statementRepository).deleteById(statementId);
+        verify(statementGapService).detectGaps(cardId);
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    void screenshotImportMarksTransactionsAsScreenshotSource() throws Exception {
+        Long userId = 1L;
+        ParsedStatement parsed = statementOf(debit(1, "2026-09-05", "100.00", "Магазин А"));
+        when(screenshotParser.parse(any(byte[].class))).thenReturn(parsed);
+        when(screenshotParser.version()).thenReturn("screenshot-1.0");
+        when(transactionRepository.findExistingFingerprints(anyCollection())).thenReturn(Set.of());
+
+        StatementPreviewResponse preview = service.preview(userId, new byte[]{1}, true);
+        assertThat(preview.transactions()).hasSize(1);
+
+        service.confirm(userId, preview.draftId(), null);
+
+        ArgumentCaptor<List<Transaction>> captor = ArgumentCaptor.forClass(List.class);
+        verify(transactionRepository).saveAll(captor.capture());
+        assertThat(captor.getValue()).hasSize(1);
+        assertThat(captor.getValue().get(0).getSource()).isEqualTo("screenshot");
     }
 }

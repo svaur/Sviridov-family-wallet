@@ -8,6 +8,8 @@ RUN mvn -B -q package -DskipTests
 
 # Runtime stage
 FROM eclipse-temurin:21-jre-alpine
+# Tesseract OCR (with Russian language data) for bank-feed screenshot import.
+RUN apk add --no-cache tesseract-ocr tesseract-ocr-data-rus tesseract-ocr-data-eng
 WORKDIR /app
 COPY --from=build /app/target/*.jar app.jar
 EXPOSE 8080

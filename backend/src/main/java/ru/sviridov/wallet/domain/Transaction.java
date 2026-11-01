@@ -15,7 +15,8 @@ import java.time.LocalDate;
  * A single operation row. {@code amount} holds the value of the filled column
  * (Расход→debit, Приход→credit); the opposite column is always null.
  * {@code source} records the funding source: a bank statement import
- * ({@link #SOURCE_STATEMENT}) or a manual entry tied to a card, cash or other
+ * ({@link #SOURCE_STATEMENT}), a screenshot (bank-feed) import
+ * ({@link #SOURCE_SCREENSHOT}) or a manual entry tied to a card, cash or other
  * ({@link #SOURCE_CARD}, {@link #SOURCE_CASH}, {@link #SOURCE_OTHER}); the card
  * is optional (null for cash/other). {@code fingerprint} is the SHA-256 dedup
  * key for statement rows; rows are soft-deleted via {@code deletedAt} (tombstone).
@@ -27,6 +28,7 @@ import java.time.LocalDate;
 public class Transaction {
 
     public static final String SOURCE_STATEMENT = "statement";
+    public static final String SOURCE_SCREENSHOT = "screenshot";
     public static final String SOURCE_CARD = "card";
     public static final String SOURCE_CASH = "cash";
     public static final String SOURCE_OTHER = "other";
@@ -122,6 +124,10 @@ public class Transaction {
         return cardId;
     }
 
+    public void setCardId(Long cardId) {
+        this.cardId = cardId;
+    }
+
     public Long getStatementId() {
         return statementId;
     }
@@ -138,8 +144,16 @@ public class Transaction {
         return date;
     }
 
+    public void setDate(LocalDate date) {
+        this.date = date;
+    }
+
     public String getOperation() {
         return operation;
+    }
+
+    public void setOperation(String operation) {
+        this.operation = operation;
     }
 
     public String getPurpose() {
@@ -148,6 +162,10 @@ public class Transaction {
 
     public BigDecimal getAmount() {
         return amount;
+    }
+
+    public void setAmount(BigDecimal amount) {
+        this.amount = amount;
     }
 
     public String getType() {
@@ -204,6 +222,10 @@ public class Transaction {
 
     public String getFingerprint() {
         return fingerprint;
+    }
+
+    public void setFingerprint(String fingerprint) {
+        this.fingerprint = fingerprint;
     }
 
     public Instant getDeletedAt() {

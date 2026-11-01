@@ -30,7 +30,7 @@ class CardServiceTest {
 
     @Test
     void findOrCreateByNumberCreatesWhenAbsent() {
-        when(cardRepository.findByUserIdAndCardNumber(7L, "2202XXXXXXXX1234")).thenReturn(Optional.empty());
+        when(cardRepository.findByUserIdAndLast4(7L, "1234")).thenReturn(Optional.empty());
         when(cardRepository.save(any(Card.class))).thenAnswer(inv -> inv.getArgument(0));
 
         Card card = cardService.findOrCreateByNumber(7L, "2202XXXXXXXX1234");
@@ -47,9 +47,22 @@ class CardServiceTest {
     @Test
     void findOrCreateByNumberReturnsExisting() {
         Card existing = new Card(7L, "2202XXXXXXXX1234", "Зарплатная");
-        when(cardRepository.findByUserIdAndCardNumber(7L, "2202XXXXXXXX1234")).thenReturn(Optional.of(existing));
+        when(cardRepository.findByUserIdAndLast4(7L, "1234")).thenReturn(Optional.of(existing));
 
         Card card = cardService.findOrCreateByNumber(7L, "2202XXXXXXXX1234");
+
+        assertThat(card).isSameAs(existing);
+        verify(cardRepository, never()).save(any(Card.class));
+    }
+
+    @Test
+    void findOrCreateByNumberMatchesScreenshotMaskByLast4() {
+        // A screenshot yields a masked "••••4242"; it must resolve to the same
+        // card as a full "2202XXXXXXXX4242" (matched by last4).
+        Card existing = new Card(7L, "2202XXXXXXXX4242", "Основная");
+        when(cardRepository.findByUserIdAndLast4(7L, "4242")).thenReturn(Optional.of(existing));
+
+        Card card = cardService.findOrCreateByNumber(7L, "••••4242");
 
         assertThat(card).isSameAs(existing);
         verify(cardRepository, never()).save(any(Card.class));

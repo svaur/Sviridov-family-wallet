@@ -28,4 +28,19 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
     List<Transaction> findActiveByUserId(@Param("userId") Long userId);
 
     Optional<Transaction> findByIdAndUserId(Long id, Long userId);
+
+    /** Active (non soft-deleted) transactions imported from one statement. */
+    @Query("""
+            select t from Transaction t
+            where t.statementId = :statementId and t.deletedAt is null
+            """)
+    List<Transaction> findActiveByStatementId(@Param("statementId") Long statementId);
+
+    /**
+     * All transactions imported from one statement, including soft-deleted
+     * tombstones. Used to hard-delete a statement's data so a re-upload imports
+     * it fresh (a tombstone fingerprint must not block it).
+     */
+    @Query("select t from Transaction t where t.statementId = :statementId")
+    List<Transaction> findByStatementId(@Param("statementId") Long statementId);
 }

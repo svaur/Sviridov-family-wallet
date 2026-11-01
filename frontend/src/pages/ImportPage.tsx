@@ -11,6 +11,13 @@ interface Category {
   icon: string
 }
 
+interface Card {
+  id: number
+  cardNumber: string | null
+  displayName: string
+  last4: string
+}
+
 interface PreviewTx {
   rowNumber: number
   date: string
@@ -20,10 +27,11 @@ interface PreviewTx {
   type: string
   categoryId: number | null
   categoryName: string | null
+  categoryManual: boolean
 }
 
 interface Preview {
-  draftId: string
+  parserVersion: string
   periodFrom: string | null
   periodTo: string | null
   cardNumber: string | null
@@ -31,7 +39,6 @@ interface Preview {
   account: string | null
   rowCountRaw: number
   validCount: number
-  skippedDuplicates: number
   warnings: string[]
   unrecognizedRows: string[]
   transactions: PreviewTx[]
@@ -77,11 +84,15 @@ export function ImportPage() {
   const [preview, setPreview] = useState<Preview | null>(null)
   const [result, setResult] = useState<ImportResult | null>(null)
   const [loading, setLoading] = useState(false)
+  const [stage, setStage] = useState('')
+  const [elapsed, setElapsed] = useState(0)
   const [error, setError] = useState<string | null>(null)
 
   const [categories, setCategories] = useState<Category[]>([])
+  const [cards, setCards] = useState<Card[]>([])
   const [expandedRow, setExpandedRow] = useState<number | null>(null)
   const [rulePrefill, setRulePrefill] = useState<RulePrefill | null>(null)
+  const [cardSelect, setCardSelect] = useState('')
   const [cardInput, setCardInput] = useState('')
   const [editRow, setEditRow] = useState<number | null>(null)
   const [editOperation, setEditOperation] = useState('')
@@ -98,7 +109,33 @@ export function ImportPage() {
       .get<Category[]>('/api/categories')
       .then(setCategories)
       .catch(() => {})
+    api
+      .get<Card[]>('/api/cards')
+      .then(setCards)
+      .catch(() => {})
   }, [])
+
+  // Screenshot uploads sometimes lose the card number during OCR. Let the
+  // user pick one of their existing cards instead of retyping it from memory.
+  function onPickCard(value: string) {
+    setCardSelect(value)
+    if (value === '__new__') {
+      setCardInput('')
+      return
+    }
+    const card = cards.find((c) => String(c.id) === value)
+    setCardInput(card ? (card.cardNumber ?? card.last4) : '')
+  }
+
+  useEffect(() => {
+    if (!loading) {
+      setElapsed(0)
+      return
+    }
+    const startedAt = Date.now()
+    const id = setInterval(() => setElapsed(Math.round((Date.now() - startedAt) / 1000)), 1000)
+    return () => clearInterval(id)
+  }, [loading])
 
   async function onChooseFile(e: FormEvent) {
     e.preventDefault()
@@ -112,6 +149,7 @@ export function ImportPage() {
       return
     }
     setLoading(true)
+    setStage(isScreenshot ? 'Разбивка скриншота и распознавание текста…' : 'Разбор выписки…')
     try {
       const kind = isScreenshot ? 'screenshot' : 'statement'
       setPreview(await api.upload<Preview>(`/api/statements/preview?kind=${kind}`, file))
@@ -120,38 +158,57 @@ export function ImportPage() {
       setError(err instanceof HttpError ? err.message : 'Не удалось разобрать выписку')
     } finally {
       setLoading(false)
+      setStage('')
     }
   }
 
   async function onRecategorize() {
     if (!preview) return
     setLoading(true)
+    setStage('Применение правил…')
     setError(null)
     try {
-      setPreview(await api.post<Preview>(`/api/statements/preview/${preview.draftId}/recategorize`))
+      const rows = await api.post<PreviewTx[]>('/api/statements/categorize', preview.transactions)
+      setPreview({ ...preview, transactions: rows })
     } catch (err) {
       setError(err instanceof HttpError ? err.message : 'Не удалось применить правила')
     } finally {
       setLoading(false)
+      setStage('')
     }
   }
 
   async function onConfirm() {
     if (!preview) return
-    if (!last4(preview.cardNumber) && !cardInput.trim()) {
+    const resolvedCard = last4(preview.cardNumber) ? preview.cardNumber : cardInput.trim()
+    if (!last4(resolvedCard)) {
       setError('Укажите номер карты')
       return
     }
     setLoading(true)
+    setStage('Импорт…')
     setError(null)
     try {
-      const query = last4(preview.cardNumber) ? '' : `?cardNumber=${encodeURIComponent(cardInput.trim())}`
-      setResult(await api.post<ImportResult>(`/api/statements/preview/${preview.draftId}/confirm${query}`))
+      setResult(
+        await api.post<ImportResult>('/api/statements/confirm', {
+          cardNumber: resolvedCard,
+          parserVersion: preview.parserVersion,
+          periodFrom: preview.periodFrom,
+          periodTo: preview.periodTo,
+          contract: preview.contract,
+          account: preview.account,
+          rowCountRaw: preview.rowCountRaw,
+          warnings: preview.warnings,
+          unrecognizedRows: preview.unrecognizedRows,
+          transactions: preview.transactions,
+        }),
+      )
       setStep(4)
     } catch (err) {
       setError(err instanceof HttpError ? err.message : 'Не удалось импортировать выписку')
     } finally {
       setLoading(false)
+      setStage('')
     }
   }
 
@@ -173,70 +230,66 @@ export function ImportPage() {
     setRulePrefill(null)
   }
 
-  async function saveEdit(tx: PreviewTx) {
+  function saveEdit(tx: PreviewTx) {
     if (!preview) return
-    setError(null)
-    try {
-      setPreview(
-        await api.put<Preview>(
-          `/api/statements/preview/${preview.draftId}/transactions/${tx.rowNumber}`,
-          { operation: editOperation, amount: Number(editAmount), date: editDate },
-        ),
-      )
-      setEditRow(null)
-    } catch (err) {
-      setError(err instanceof HttpError ? err.message : 'Не удалось сохранить операцию')
-    }
+    setPreview({
+      ...preview,
+      transactions: preview.transactions.map((t) =>
+        t.rowNumber === tx.rowNumber
+          ? { ...t, operation: editOperation, amount: Number(editAmount), date: editDate }
+          : t,
+      ),
+    })
+    setEditRow(null)
   }
 
-  async function addRow() {
+  function addRow() {
     if (!preview) return
-    setError(null)
-    try {
-      setPreview(
-        await api.post<Preview>(`/api/statements/preview/${preview.draftId}/transactions`, {
-          operation: addOperation,
-          amount: Number(addAmount),
-          type: addType,
-          date: addDate,
-        }),
-      )
-      setAddOpen(false)
-      setAddOperation('')
-      setAddAmount('')
-      setAddType('debit')
-    } catch (err) {
-      setError(err instanceof HttpError ? err.message : 'Не удалось добавить операцию')
+    const nextNumber = preview.transactions.reduce((m, t) => Math.max(m, t.rowNumber), 0) + 1
+    const newTx: PreviewTx = {
+      rowNumber: nextNumber,
+      date: addDate,
+      operation: addOperation,
+      purpose: null,
+      amount: Number(addAmount),
+      type: addType,
+      categoryId: null,
+      categoryName: null,
+      categoryManual: false,
     }
+    setPreview({
+      ...preview,
+      validCount: preview.validCount + 1,
+      transactions: [...preview.transactions, newTx],
+    })
+    setAddOpen(false)
+    setAddOperation('')
+    setAddAmount('')
+    setAddType('debit')
   }
 
-  async function assignCategory(tx: PreviewTx, categoryId: number) {
+  function assignCategory(tx: PreviewTx, categoryId: number) {
     if (!preview) return
-    setError(null)
-    try {
-      setPreview(
-        await api.post<Preview>(
-          `/api/statements/preview/${preview.draftId}/transactions/${tx.rowNumber}/category`,
-          { categoryId },
-        ),
-      )
-    } catch (err) {
-      setError(err instanceof HttpError ? err.message : 'Не удалось назначить категорию')
-    }
+    const cat = categories.find((c) => c.id === categoryId)
+    setPreview({
+      ...preview,
+      transactions: preview.transactions.map((t) =>
+        t.rowNumber === tx.rowNumber
+          ? { ...t, categoryId, categoryName: cat?.name ?? null, categoryManual: true }
+          : t,
+      ),
+    })
   }
 
-  async function deleteRow(tx: PreviewTx) {
+  function deleteRow(tx: PreviewTx) {
     if (!preview) return
     if (!window.confirm('Удалить операцию из выгрузки?')) return
-    setError(null)
-    try {
-      setPreview(
-        await api.del<Preview>(`/api/statements/preview/${preview.draftId}/transactions/${tx.rowNumber}`),
-      )
-      setExpandedRow(null)
-    } catch (err) {
-      setError(err instanceof HttpError ? err.message : 'Не удалось удалить операцию')
-    }
+    setPreview({
+      ...preview,
+      validCount: preview.validCount - 1,
+      transactions: preview.transactions.filter((t) => t.rowNumber !== tx.rowNumber),
+    })
+    setExpandedRow(null)
   }
 
   function createRuleFrom(tx: PreviewTx) {
@@ -269,6 +322,14 @@ export function ImportPage() {
           <span className="n">{step === 4 ? '✓' : '3'}</span>Подтверждение
         </span>
       </div>
+
+      {loading && (
+        <div className="progress-line" role="status">
+          <span className="spinner" aria-hidden="true" />
+          {stage}
+          {elapsed > 0 && <span className="muted"> · {elapsed} с</span>}
+        </div>
+      )}
 
       {isScreenshot && (
         <div className="warning">
@@ -310,12 +371,25 @@ export function ImportPage() {
                 {last4(preview.cardNumber) ? (
                   <b>•••• {last4(preview.cardNumber)}</b>
                 ) : (
-                  <input
-                    type="text"
-                    value={cardInput}
-                    onChange={(e) => setCardInput(e.target.value)}
-                    placeholder="введите номер карты"
-                  />
+                  <div className="card-pick">
+                    <select value={cardSelect} onChange={(e) => onPickCard(e.target.value)}>
+                      <option value="">— выберите карту —</option>
+                      {cards.map((c) => (
+                        <option key={c.id} value={String(c.id)}>
+                          •••• {c.last4} · {c.displayName}
+                        </option>
+                      ))}
+                      <option value="__new__">＋ Новая карта</option>
+                    </select>
+                    {cardSelect === '__new__' && (
+                      <input
+                        type="text"
+                        value={cardInput}
+                        onChange={(e) => setCardInput(e.target.value)}
+                        placeholder="номер карты, напр. 2202XXXXXXXX4242"
+                      />
+                    )}
+                  </div>
                 )}
               </div>
               <div className="m">
@@ -344,9 +418,9 @@ export function ImportPage() {
                 </ul>
               </>
             )}
-            {!last4(preview.cardNumber) && (
+            {!last4(preview.cardNumber) && !last4(cardInput) && (
               <div className="warning">
-                ⚠ Не удалось определить номер карты — введите его в поле «Карта» выше.
+                ⚠ Не удалось определить номер карты — выберите существующую карту или создайте новую, чтобы продолжить.
               </div>
             )}
             {uncategorizedCount > 0 && (
@@ -378,9 +452,6 @@ export function ImportPage() {
                   {addOpen ? 'Скрыть форму' : 'Добавить строку'}
                 </button>
               )}
-              <Link className="link-btn" to="/rules" target="_blank" rel="noreferrer">
-                Создать / изменить правила
-              </Link>
             </div>
 
             {isScreenshot && addOpen && (
@@ -430,6 +501,7 @@ export function ImportPage() {
             <table className="table">
               <thead>
                 <tr>
+                  <th className="row-num">№</th>
                   <th>Дата</th>
                   <th>Операция</th>
                   <th>Назначение платежа</th>
@@ -438,12 +510,13 @@ export function ImportPage() {
                 </tr>
               </thead>
               <tbody>
-                {preview.transactions.map((tx) => (
+                {preview.transactions.map((tx, idx) => (
                   <Fragment key={tx.rowNumber}>
                     <tr
                       className={expandedRow === tx.rowNumber ? 'tx-row open' : 'tx-row'}
                       onClick={() => toggleRow(tx.rowNumber)}
                     >
+                      <td className="row-num">{idx + 1}</td>
                       <td>{fmtDate(tx.date)}</td>
                       <td>{tx.operation ?? '—'}</td>
                       <td className="muted" title={tx.purpose ?? undefined}>{tx.purpose ?? '—'}</td>
@@ -456,14 +529,17 @@ export function ImportPage() {
                           <span className="uncategorized">Без категории</span>
                         )}
                       </td>
-                      <td className={`amount ${tx.type === 'debit' ? 'amount-debit' : 'amount-credit'}`}>
+                      <td
+                        className={`amount ${Number(tx.amount) === 0 ? 'amount-suspect' : tx.type === 'debit' ? 'amount-debit' : 'amount-credit'}`}
+                        title={Number(tx.amount) === 0 ? 'Сумма не распознана — проверьте' : undefined}
+                      >
                         {tx.type === 'debit' ? '− ' : '+ '}
                         {fmtMoney(tx.amount)}
                       </td>
                     </tr>
                     {expandedRow === tx.rowNumber && (
                       <tr>
-                        <td colSpan={5}>
+                        <td colSpan={6}>
                           <div className="tx-actions">
                             <CategoryPicker
                               categories={categories}
@@ -550,7 +626,7 @@ export function ImportPage() {
                 ))}
                 {preview.transactions.length === 0 && (
                   <tr>
-                    <td colSpan={5}>Распознанных операций нет</td>
+                    <td colSpan={6}>Распознанных операций нет</td>
                   </tr>
                 )}
               </tbody>
@@ -561,7 +637,13 @@ export function ImportPage() {
                 <button className="btn-secondary" onClick={() => setStep(1)}>
                   Назад
                 </button>
-                <button onClick={() => setStep(3)}>Далее →</button>
+                <button
+                  onClick={() => setStep(3)}
+                  disabled={!last4(preview.cardNumber) && !last4(cardInput)}
+                  title={!last4(preview.cardNumber) && !last4(cardInput) ? 'Сначала укажите карту' : undefined}
+                >
+                  Далее →
+                </button>
               </div>
             </div>
           </section>
@@ -572,8 +654,7 @@ export function ImportPage() {
         <section className="card">
           <h2>Подтверждение изменений</h2>
           <p>
-            Будет импортировано <strong>{preview.validCount - preview.skippedDuplicates}</strong> операций
-            (пропущено дубликатов: {preview.skippedDuplicates}).
+            Будет импортировано <strong>{preview.transactions.length}</strong> операций.
           </p>
           <p>
             Карта:{' '}

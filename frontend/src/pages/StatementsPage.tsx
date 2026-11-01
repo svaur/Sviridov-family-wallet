@@ -133,7 +133,7 @@ export function StatementsPage() {
       {msg && <div className="success">{msg}</div>}
 
       <section className="card">
-        <h2>Загрузка выписки из PDF</h2>
+        <h2>Загрузка выписки из PDF или скриншота ленты</h2>
         <div className="steps">
           <span>1. <b>Выбрать файл</b></span>
           <span>→</span>
@@ -141,7 +141,7 @@ export function StatementsPage() {
           <span>→</span>
           <span>3. <b>Подтвердить импорт</b></span>
         </div>
-        <p className="muted">PDF до 10 МБ. Карта создаётся автоматически по номеру из выписки, сам файл не хранится. Если банк формирует выписку некорректно, можно загрузить скриншот ленты операций.</p>
+        <p className="muted">PDF до 10 МБ. Карта создаётся автоматически по номеру из выписки, сам файл не хранится. Если банк формирует выписку некорректно, можно загрузить скриншот (JPG/PNG) ленты операций.</p>
       </section>
 
       {lastGap && (

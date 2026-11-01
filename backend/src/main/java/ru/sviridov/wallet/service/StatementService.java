@@ -19,21 +19,27 @@ import ru.sviridov.wallet.parser.StatementParseException;
 import ru.sviridov.wallet.parser.StatementParser;
 import ru.sviridov.wallet.web.BadRequestException;
 import ru.sviridov.wallet.web.NotFoundException;
+import ru.sviridov.wallet.web.dto.ConfirmRequest;
 import ru.sviridov.wallet.web.dto.StatementImportResponse;
 import ru.sviridov.wallet.web.dto.StatementPreviewResponse;
 
-import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
-import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+/**
+ * Parses bank statements (PDF) and bank-feed screenshots (OCR) and imports
+ * them. The upload wizard is stateless on the backend: {@link #preview} parses
+ * and categorises without storing anything, {@link #categorize} re-applies the
+ * rules to an in-progress row set, and {@link #confirm} persists the final rows.
+ * The frontend holds the rows between these calls.
+ */
 @Service
 public class StatementService {
 
@@ -45,14 +51,13 @@ public class StatementService {
     private final PdfBoxStatementParser parser;
     private final ScreenshotParser screenshotParser;
     private final CategorizationEngine categorizationEngine;
-    private final StatementDraftStore draftStore;
     private final StatementGapService statementGapService;
 
     public StatementService(CardService cardService, StatementRepository statementRepository,
                             TransactionRepository transactionRepository, RuleRepository ruleRepository,
                             CategoryRepository categoryRepository, PdfBoxStatementParser parser,
                             ScreenshotParser screenshotParser, CategorizationEngine categorizationEngine,
-                            StatementDraftStore draftStore, StatementGapService statementGapService) {
+                            StatementGapService statementGapService) {
         this.cardService = cardService;
         this.statementRepository = statementRepository;
         this.transactionRepository = transactionRepository;
@@ -61,140 +66,142 @@ public class StatementService {
         this.parser = parser;
         this.screenshotParser = screenshotParser;
         this.categorizationEngine = categorizationEngine;
-        this.draftStore = draftStore;
         this.statementGapService = statementGapService;
     }
 
     /**
-     * Step 1 of the upload wizard: parse, validate and categorise the PDF or a
-     * bank-feed screenshot without persisting transactions, and keep the result
-     * as a draft. The card is created automatically from the extracted number.
+     * Step 1: parse, validate and categorise the uploaded PDF/screenshot without
+     * persisting anything. Returns the rows together with metadata and warnings;
+     * the card is NOT created here — it is resolved on {@link #confirm}.
      *
      * @param screenshot {@code true} when the bytes are a bank-feed screenshot
      *                   image (OCR), {@code false} for a PDF statement.
      */
     public StatementPreviewResponse preview(Long userId, byte[] bytes, boolean screenshot) {
-        StatementDraft draft = prepare(userId, bytes, screenshot);
-        String draftId = draftStore.put(draft);
-        return toPreview(draftId, draft, countDuplicates(draft.transactions()));
-    }
+        StatementParser activeParser = screenshot ? screenshotParser : parser;
+        ParsedStatement parsed;
+        try {
+            parsed = activeParser.parse(bytes);
+        } catch (StatementParseException e) {
+            throw new BadRequestException("Не удалось распознать выписку: " + e.getMessage());
+        }
 
-    /** Step 2: re-run categorisation over the draft using the current rule set. */
-    public StatementPreviewResponse recategorize(Long userId, String draftId) {
-        StatementDraft draft = getDraft(userId, draftId);
+        List<String> warnings = new ArrayList<>();
+        List<String> unrecognized = new ArrayList<>(parsed.unrecognizedRows());
+        List<ParsedRow> validRows = new ArrayList<>();
+
+        int prevRowNumber = 0;
+        for (ParsedRow row : parsed.rows()) {
+            boolean xorOk = (row.expense() != null) != (row.income() != null);
+            if (!xorOk || row.amount() == null) {
+                unrecognized.add("Строка " + row.rowNumber() + ": некорректная сумма/колонка");
+                continue;
+            }
+            if (row.amount().signum() < 0) {
+                unrecognized.add("Строка " + row.rowNumber() + ": отрицательная сумма");
+                continue;
+            }
+            if (row.amount().signum() == 0) {
+                // The parser keeps rows whose amount it could not read, with a zero
+                // amount, so the user can correct them in the wizard instead of
+                // re-creating the operation by hand.
+                warnings.add("Строка " + row.rowNumber() + ": сумма не распознана (0 ₽) — проверьте");
+            }
+            if (row.date() == null) {
+                unrecognized.add("Строка " + row.rowNumber() + ": дата не определена");
+                continue;
+            }
+            if (parsed.periodFrom() != null && parsed.periodTo() != null
+                    && (row.date().isBefore(parsed.periodFrom()) || row.date().isAfter(parsed.periodTo()))) {
+                warnings.add("Строка " + row.rowNumber() + ": дата вне периода выписки");
+            }
+            if (prevRowNumber > 0 && row.rowNumber() <= prevRowNumber) {
+                warnings.add("Строка " + row.rowNumber() + ": номер не монотонный");
+            }
+            prevRowNumber = row.rowNumber();
+            validRows.add(row);
+        }
+
+        // Warn about an overlapping period via a read-only card lookup (no creation).
+        if (parsed.periodFrom() != null && parsed.periodTo() != null) {
+            cardService.findByLast4(userId, parsed.cardNumber()).ifPresent(card -> {
+                if (statementRepository.existsOverlapping(card.getId(), parsed.periodFrom(), parsed.periodTo())) {
+                    warnings.add("Период выписки пересекается с уже загруженной выпиской");
+                }
+            });
+        }
+
         List<Rule> rules = ruleRepository.findByUserIdOrderByPriorityDescIdAsc(userId);
-        for (Transaction tx : draft.transactions()) {
-            if (!tx.isCategoryManual()) {
-                tx.setCategoryId(categorizationEngine.categorize(tx, rules));
-            }
+        Map<Long, String> categoryNames = categoryNames(userId);
+
+        List<StatementPreviewResponse.PreviewTransaction> transactions = new ArrayList<>();
+        for (ParsedRow row : validRows) {
+            Transaction tx = toTransaction(userId, row);
+            Long categoryId = categorizationEngine.categorize(tx, rules);
+            transactions.add(new StatementPreviewResponse.PreviewTransaction(
+                    row.rowNumber(), row.date(), row.operation(), row.purpose(), row.amount(),
+                    row.type(), categoryId, categoryName(categoryId, categoryNames), false));
         }
-        return toPreview(draftId, draft, countDuplicates(draft.transactions()));
-    }
 
-    /** Step 2: remove one transaction from the draft (it will not be imported). */
-    public StatementPreviewResponse removeTransaction(Long userId, String draftId, int rowNumber) {
-        StatementDraft draft = getDraft(userId, draftId);
-        List<Transaction> kept = draft.transactions().stream()
-                .filter(tx -> tx.getRowNumber() == null || tx.getRowNumber() != rowNumber)
-                .collect(Collectors.toCollection(ArrayList::new));
-        StatementDraft updated = new StatementDraft(draft.userId(), draft.cardId(), draft.parserVersion(),
-                draft.periodFrom(), draft.periodTo(), draft.cardNumber(), draft.contract(), draft.account(),
-                draft.rowCountRaw(), kept.size(), kept, draft.warnings(), draft.unrecognizedRows(), draft.createdAt());
-        draftStore.replace(draftId, updated);
-        return toPreview(draftId, updated, countDuplicates(kept));
-    }
-
-    /** Step 2: assign a category manually to one transaction in the draft. */
-    public StatementPreviewResponse assignDraftCategory(Long userId, String draftId, int rowNumber,
-                                                        Long categoryId) {
-        StatementDraft draft = getDraft(userId, draftId);
-        categoryRepository.findByIdAndUserId(categoryId, userId)
-                .orElseThrow(() -> new NotFoundException("Категория не найдена"));
-        Transaction tx = draft.transactions().stream()
-                .filter(t -> t.getRowNumber() != null && t.getRowNumber() == rowNumber)
-                .findFirst()
-                .orElseThrow(() -> new NotFoundException("Строка не найдена"));
-        tx.setCategoryId(categoryId);
-        tx.setCategoryManual(true);
-        return toPreview(draftId, draft, countDuplicates(draft.transactions()));
-    }
-
-    /** Step 2: edit the operation, amount and date of one transaction in the draft. */
-    public StatementPreviewResponse editDraftTransaction(Long userId, String draftId, int rowNumber,
-                                                         String operation, BigDecimal amount, LocalDate date) {
-        StatementDraft draft = getDraft(userId, draftId);
-        Transaction tx = draft.transactions().stream()
-                .filter(t -> t.getRowNumber() != null && t.getRowNumber() == rowNumber)
-                .findFirst()
-                .orElseThrow(() -> new NotFoundException("Строка не найдена"));
-        tx.setOperation(operation.trim());
-        tx.setAmount(amount);
-        tx.setDate(date);
-        tx.setFingerprint(fingerprint(draft.userId(), draft.cardId(), tx));
-        return toPreview(draftId, draft, countDuplicates(draft.transactions()));
-    }
-
-    /** Step 2: add a transaction to a screenshot draft (source = statement, not manual). */
-    public StatementPreviewResponse addDraftTransaction(Long userId, String draftId, String operation,
-                                                        BigDecimal amount, String type, LocalDate date) {
-        StatementDraft draft = getDraft(userId, draftId);
-        int maxRowNumber = 0;
-        for (Transaction t : draft.transactions()) {
-            if (t.getRowNumber() != null && t.getRowNumber() > maxRowNumber) {
-                maxRowNumber = t.getRowNumber();
-            }
-        }
-        int rowNumber = maxRowNumber + 1;
-        Transaction tx = new Transaction(draft.userId(), draft.cardId(), rowNumber, date,
-                operation.trim(), null, amount, type, null);
-        if (isScreenshot(draft)) {
-            tx.setSource(Transaction.SOURCE_SCREENSHOT);
-        }
-        tx.setFingerprint(fingerprint(draft.userId(), draft.cardId(), tx));
-        List<Transaction> transactions = new ArrayList<>(draft.transactions());
-        transactions.add(tx);
-        StatementDraft updated = new StatementDraft(draft.userId(), draft.cardId(), draft.parserVersion(),
-                draft.periodFrom(), draft.periodTo(), draft.cardNumber(), draft.contract(), draft.account(),
-                draft.rowCountRaw(), transactions.size(), transactions, draft.warnings(),
-                draft.unrecognizedRows(), draft.createdAt());
-        draftStore.replace(draftId, updated);
-        return toPreview(draftId, updated, countDuplicates(transactions));
+        return new StatementPreviewResponse(activeParser.version(), parsed.periodFrom(), parsed.periodTo(),
+                parsed.cardNumber(), parsed.contract(), parsed.account(), parsed.rowCountRaw(),
+                validRows.size(), warnings, unrecognized, transactions);
     }
 
     /**
-     * Step 3: dedup and persist the draft, then discard it.
-     *
-     * @param cardNumber card number supplied by the user when the parser could
-     *                   not extract it (ignored when the card was resolved at
-     *                   preview time).
+     * Step 2: re-apply the current rule set to an in-progress row set. Rows
+     * marked {@code categoryManual} keep their category; the engine is the same
+     * one used at parse time. Stateless — the rows live on the frontend.
+     */
+    public List<StatementPreviewResponse.PreviewTransaction> categorize(
+            Long userId, List<StatementPreviewResponse.PreviewTransaction> transactions) {
+        List<Rule> rules = ruleRepository.findByUserIdOrderByPriorityDescIdAsc(userId);
+        Map<Long, String> categoryNames = categoryNames(userId);
+        List<StatementPreviewResponse.PreviewTransaction> result = new ArrayList<>();
+        for (StatementPreviewResponse.PreviewTransaction p : transactions) {
+            Long categoryId = p.categoryId();
+            if (!p.categoryManual()) {
+                categoryId = categorizationEngine.categorize(toTransaction(userId, p), rules);
+            }
+            result.add(new StatementPreviewResponse.PreviewTransaction(
+                    p.rowNumber(), p.date(), p.operation(), p.purpose(), p.amount(), p.type(),
+                    categoryId, categoryName(categoryId, categoryNames), p.categoryManual()));
+        }
+        return result;
+    }
+
+    /**
+     * Step 3: persist the final rows. Resolves/creates the card from the
+     * confirmed number, dedups by fingerprint and saves the statement.
      */
     @Transactional
-    public StatementImportResponse confirm(Long userId, String draftId, String cardNumber) {
-        StatementDraft draft = getDraft(userId, draftId);
+    public StatementImportResponse confirm(Long userId, ConfirmRequest request) {
+        Card card = cardService.findOrCreateByNumber(userId, request.cardNumber());
+        Long cardId = card.getId();
+        boolean screenshot = isScreenshot(request.parserVersion());
 
-        Long cardId = draft.cardId();
-        String resolvedCardNumber = draft.cardNumber();
-        if (cardId == null) {
-            // The parser found no card number; the user supplies it here.
-            Card card = cardService.findOrCreateByNumber(userId, cardNumber);
-            cardId = card.getId();
-            resolvedCardNumber = cardNumber == null ? null : cardNumber.trim();
-            for (Transaction tx : draft.transactions()) {
-                tx.setCardId(cardId);
-                tx.setFingerprint(fingerprint(userId, cardId, tx));
-            }
+        List<Rule> rules = ruleRepository.findByUserIdOrderByPriorityDescIdAsc(userId);
+
+        List<Transaction> candidates = new ArrayList<>();
+        for (StatementPreviewResponse.PreviewTransaction p : request.transactions()) {
+            Transaction tx = toTransaction(userId, p);
+            tx.setCardId(cardId);
+            tx.setSource(screenshot ? Transaction.SOURCE_SCREENSHOT : Transaction.SOURCE_STATEMENT);
+            Long categoryId = p.categoryManual() ? p.categoryId() : categorizationEngine.categorize(tx, rules);
+            tx.setCategoryId(categoryId);
+            tx.setCategoryManual(p.categoryManual());
+            tx.setFingerprint(fingerprint(userId, cardId, tx));
+            candidates.add(tx);
         }
 
-        List<String> fingerprints = draft.transactions().stream()
-                .map(Transaction::getFingerprint)
-                .toList();
+        List<String> fingerprints = candidates.stream().map(Transaction::getFingerprint).toList();
         Set<String> existing = fingerprints.isEmpty()
                 ? Set.of()
                 : transactionRepository.findExistingFingerprints(fingerprints);
 
         int skippedDuplicates = 0;
         List<Transaction> toSave = new ArrayList<>();
-        for (Transaction tx : draft.transactions()) {
+        for (Transaction tx : candidates) {
             if (existing.contains(tx.getFingerprint())) {
                 skippedDuplicates++;
                 continue;
@@ -202,11 +209,11 @@ public class StatementService {
             toSave.add(tx);
         }
 
-        String status = draft.unrecognizedRows().isEmpty() ? "OK" : "PARTIAL";
+        String status = request.unrecognizedRows().isEmpty() ? "OK" : "PARTIAL";
 
-        Statement statement = new Statement(cardId, draft.periodFrom(), draft.periodTo(),
-                draft.parserVersion(), status, draft.validCount(), draft.rowCountRaw(),
-                resolvedCardNumber, draft.contract(), draft.account());
+        Statement statement = new Statement(cardId, request.periodFrom(), request.periodTo(),
+                request.parserVersion(), status, request.transactions().size(), request.rowCountRaw(),
+                request.cardNumber().trim(), request.contract(), request.account());
         statement = statementRepository.save(statement);
 
         for (Transaction t : toSave) {
@@ -214,10 +221,9 @@ public class StatementService {
         }
         transactionRepository.saveAll(toSave);
         statementGapService.detectGaps(cardId);
-        draftStore.remove(draftId);
 
-        return new StatementImportResponse(statement.getId(), status, draft.rowCountRaw(),
-                toSave.size(), skippedDuplicates, draft.warnings(), draft.unrecognizedRows());
+        return new StatementImportResponse(statement.getId(), status, request.rowCountRaw(),
+                toSave.size(), skippedDuplicates, request.warnings(), request.unrecognizedRows());
     }
 
     @Transactional(readOnly = true)
@@ -249,116 +255,27 @@ public class StatementService {
         return transactions.size();
     }
 
-    private StatementDraft prepare(Long userId, byte[] bytes, boolean screenshot) {
-        StatementParser activeParser = screenshot ? screenshotParser : parser;
-        ParsedStatement parsed;
-        try {
-            parsed = activeParser.parse(bytes);
-        } catch (StatementParseException e) {
-            throw new BadRequestException("Не удалось распознать выписку: " + e.getMessage());
-        }
-
-        // The card is created automatically from the extracted card number. When
-        // the number cannot be extracted the draft is kept card-less and the user
-        // supplies the number at confirm time.
-        Card card = cardService.findOrCreateByNumberOrNull(userId, parsed.cardNumber());
-        Long cardId = card == null ? null : card.getId();
-
-        List<String> warnings = new ArrayList<>();
-        List<String> unrecognized = new ArrayList<>(parsed.unrecognizedRows());
-        List<ParsedRow> validRows = new ArrayList<>();
-
-        int prevRowNumber = 0;
-        for (ParsedRow row : parsed.rows()) {
-            boolean xorOk = (row.expense() != null) != (row.income() != null);
-            boolean positive = row.amount() != null && row.amount().signum() > 0;
-            if (!xorOk || !positive) {
-                unrecognized.add("Строка " + row.rowNumber() + ": некорректная сумма/колонка");
-                continue;
-            }
-            if (row.date() == null) {
-                unrecognized.add("Строка " + row.rowNumber() + ": дата не определена");
-                continue;
-            }
-            if (parsed.periodFrom() != null && parsed.periodTo() != null
-                    && (row.date().isBefore(parsed.periodFrom()) || row.date().isAfter(parsed.periodTo()))) {
-                warnings.add("Строка " + row.rowNumber() + ": дата вне периода выписки");
-            }
-            if (prevRowNumber > 0 && row.rowNumber() <= prevRowNumber) {
-                warnings.add("Строка " + row.rowNumber() + ": номер не монотонный");
-            }
-            prevRowNumber = row.rowNumber();
-            validRows.add(row);
-        }
-
-        // Period overlap with an already imported statement (warning only).
-        if (cardId != null && parsed.periodFrom() != null && parsed.periodTo() != null
-                && statementRepository.existsOverlapping(cardId, parsed.periodFrom(), parsed.periodTo())) {
-            warnings.add("Период выписки пересекается с уже загруженной выпиской");
-        }
-
-        // Classify rows with the current rule set.
-        List<Rule> rules = ruleRepository.findByUserIdOrderByPriorityDescIdAsc(userId);
-
-        List<Transaction> transactions = new ArrayList<>();
-        for (ParsedRow row : validRows) {
-            String fp = fingerprint(userId, cardId, row);
-            Transaction tx = new Transaction(userId, cardId, row.rowNumber(), row.date(), row.operation(),
-                    row.purpose(), row.amount(), row.type(), fp);
-            if (screenshot) {
-                tx.setSource(Transaction.SOURCE_SCREENSHOT);
-            }
-            tx.setCategoryId(categorizationEngine.categorize(tx, rules));
-            transactions.add(tx);
-        }
-
-        return new StatementDraft(userId, cardId, activeParser.version(), parsed.periodFrom(), parsed.periodTo(),
-                parsed.cardNumber(), parsed.contract(), parsed.account(), parsed.rowCountRaw(),
-                validRows.size(), transactions, warnings, unrecognized, Instant.now());
+    private Transaction toTransaction(Long userId, ParsedRow row) {
+        return new Transaction(userId, null, row.rowNumber(), row.date(), row.operation(),
+                row.purpose(), row.amount(), row.type(), null);
     }
 
-    private StatementDraft getDraft(Long userId, String draftId) {
-        StatementDraft draft = draftStore.get(draftId);
-        if (draft == null || !draft.userId().equals(userId)) {
-            throw new NotFoundException("Черновик не найден или устарел");
-        }
-        return draft;
+    private Transaction toTransaction(Long userId, StatementPreviewResponse.PreviewTransaction p) {
+        return new Transaction(userId, null, p.rowNumber(), p.date(), p.operation(), p.purpose(),
+                p.amount(), p.type(), null);
     }
 
-    /** True when the draft was produced by the screenshot (OCR) parser. */
-    private static boolean isScreenshot(StatementDraft draft) {
-        return draft.parserVersion() != null && draft.parserVersion().startsWith("screenshot");
-    }
-
-    private int countDuplicates(List<Transaction> transactions) {
-        if (transactions.isEmpty()) {
-            return 0;
-        }
-        List<String> fingerprints = transactions.stream().map(Transaction::getFingerprint).toList();
-        Set<String> existing = transactionRepository.findExistingFingerprints(fingerprints);
-        return (int) transactions.stream().filter(t -> existing.contains(t.getFingerprint())).count();
-    }
-
-    private StatementPreviewResponse toPreview(String draftId, StatementDraft draft, int skippedDuplicates) {
-        Map<Long, String> categoryNames = categoryRepository.findByUserIdOrderByNameAsc(draft.userId()).stream()
+    private Map<Long, String> categoryNames(Long userId) {
+        return categoryRepository.findByUserIdOrderByNameAsc(userId).stream()
                 .collect(Collectors.toMap(Category::getId, Category::getName));
-        List<StatementPreviewResponse.PreviewTransaction> previewTxns = draft.transactions().stream()
-                .map(tx -> new StatementPreviewResponse.PreviewTransaction(
-                        tx.getRowNumber() == null ? 0 : tx.getRowNumber(),
-                        tx.getDate(), tx.getOperation(), tx.getPurpose(), tx.getAmount(), tx.getType(),
-                        tx.getCategoryId(),
-                        tx.getCategoryId() == null ? null : categoryNames.get(tx.getCategoryId())))
-                .toList();
-        return new StatementPreviewResponse(draftId, draft.periodFrom(), draft.periodTo(),
-                draft.cardNumber(), draft.contract(), draft.account(), draft.rowCountRaw(),
-                draft.validCount(), skippedDuplicates, draft.warnings(), draft.unrecognizedRows(), previewTxns);
     }
 
-    private static String fingerprint(Long userId, Long cardId, ParsedRow row) {
-        String purpose = row.purpose() == null ? "" : row.purpose().trim().toLowerCase().replaceAll("\\s+", " ");
-        String raw = userId + "|" + cardId + "|" + row.date() + "|" + row.amount().toPlainString()
-                + "|" + row.type() + "|" + purpose;
-        return sha256(raw);
+    private static String categoryName(Long categoryId, Map<Long, String> categoryNames) {
+        return categoryId == null ? null : categoryNames.get(categoryId);
+    }
+
+    private static boolean isScreenshot(String parserVersion) {
+        return parserVersion != null && parserVersion.startsWith("screenshot");
     }
 
     private static String fingerprint(Long userId, Long cardId, Transaction tx) {

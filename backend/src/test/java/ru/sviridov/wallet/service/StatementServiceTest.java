@@ -20,10 +20,11 @@ import ru.sviridov.wallet.parser.ParsedRow;
 import ru.sviridov.wallet.parser.ParsedStatement;
 import ru.sviridov.wallet.parser.PdfBoxStatementParser;
 import ru.sviridov.wallet.parser.ScreenshotParser;
-import ru.sviridov.wallet.parser.StatementParser;
+import ru.sviridov.wallet.web.dto.ConfirmRequest;
 import ru.sviridov.wallet.web.dto.StatementImportResponse;
 import ru.sviridov.wallet.web.dto.StatementPreviewResponse;
 
+import java.io.InputStream;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.Collection;
@@ -39,6 +40,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -71,12 +73,12 @@ class StatementServiceTest {
         lenient().when(categoryRepository.findByUserIdOrderByNameAsc(anyLong())).thenReturn(List.of());
         Card resolvedCard = mock(Card.class);
         lenient().when(resolvedCard.getId()).thenReturn(5L);
-        lenient().when(cardService.findOrCreateByNumberOrNull(anyLong(), anyString()))
-                .thenReturn(resolvedCard);
+        lenient().when(cardService.findOrCreateByNumber(anyLong(), anyString())).thenReturn(resolvedCard);
+        lenient().when(cardService.findByLast4(anyLong(), anyString())).thenReturn(Optional.empty());
         CategorizationEngine engine = new CategorizationEngine(new ObjectMapper(), new TextNormalizer());
         service = new StatementService(cardService, statementRepository, transactionRepository,
                 ruleRepository, categoryRepository, parser, screenshotParser, engine,
-                new StatementDraftStore(), statementGapService);
+                statementGapService);
     }
 
     private static ParsedStatement statementOf(ParsedRow... rows) {
@@ -91,19 +93,114 @@ class StatementServiceTest {
                 "Списание по транзакции. Безналичная оплата покупки");
     }
 
+    private static ConfirmRequest confirmRequest(StatementPreviewResponse preview, String cardNumber) {
+        return new ConfirmRequest(
+                cardNumber != null ? cardNumber : preview.cardNumber(),
+                preview.parserVersion(), preview.periodFrom(), preview.periodTo(),
+                preview.contract(), preview.account(), preview.rowCountRaw(),
+                preview.warnings(), preview.unrecognizedRows(), preview.transactions());
+    }
+
     private StatementPreviewResponse doPreview(Long userId, ParsedStatement parsed) throws Exception {
         when(parser.parse(any(byte[].class))).thenReturn(parsed);
         return service.preview(userId, new byte[]{1}, false);
     }
 
     @Test
-    void autoCreatesCardFromStatementNumber() throws Exception {
+    void previewParsesAndReturnsRowsWithoutCreatingCard() throws Exception {
         Long userId = 1L;
-        ParsedStatement parsed = statementOf(debit(1, "2026-09-05", "100.00", "Магазин А"));
+        ParsedStatement parsed = statementOf(
+                debit(1, "2026-09-05", "100.00", "Магазин А"),
+                debit(2, "2026-09-06", "200.00", "Магазин Б"));
+        when(parser.version()).thenReturn("test-1.0");
 
-        doPreview(userId, parsed);
+        StatementPreviewResponse preview = doPreview(userId, parsed);
 
-        verify(cardService).findOrCreateByNumberOrNull(userId, "2202XXXXXXXX1234");
+        assertThat(preview.parserVersion()).isEqualTo("test-1.0");
+        assertThat(preview.validCount()).isEqualTo(2);
+        assertThat(preview.transactions()).hasSize(2);
+        assertThat(preview.cardNumber()).isEqualTo("2202XXXXXXXX1234");
+        // Preview must NOT create a card — only a read-only lookup for the overlap check.
+        verify(cardService).findByLast4(userId, "2202XXXXXXXX1234");
+        verify(cardService, never()).findOrCreateByNumber(anyLong(), anyString());
+    }
+
+    @Test
+    void previewParsesTestPdfFileAndReturnsAllRows() throws Exception {
+        Long userId = 1L;
+        byte[] pdf;
+        try (InputStream in = getClass().getClassLoader().getResourceAsStream("TEST_PDF.pdf")) {
+            assertThat(in).isNotNull();
+            pdf = in.readAllBytes();
+        }
+
+        // Use the REAL PDF parser (not a stub) so the test exercises the same
+        // parse→validate→categorize path as production — a regression guard for
+        // the "IncorrectResultSizeDataAccessException" the preview used to throw.
+        CategorizationEngine engine = new CategorizationEngine(new ObjectMapper(), new TextNormalizer());
+        service = new StatementService(cardService, statementRepository, transactionRepository,
+                ruleRepository, categoryRepository, new PdfBoxStatementParser(), screenshotParser, engine,
+                statementGapService);
+
+        StatementPreviewResponse preview = service.preview(userId, pdf, false);
+
+        assertThat(preview.periodFrom()).isEqualTo(LocalDate.of(2026, 9, 1));
+        assertThat(preview.periodTo()).isEqualTo(LocalDate.of(2026, 9, 30));
+        assertThat(preview.cardNumber()).isEqualTo("2202XXXXXXXX1234");
+        assertThat(preview.rowCountRaw()).isEqualTo(12);
+        assertThat(preview.validCount()).isEqualTo(12);
+        assertThat(preview.transactions()).hasSize(12);
+        assertThat(preview.unrecognizedRows()).isEmpty();
+
+        StatementPreviewResponse.PreviewTransaction first = preview.transactions().get(0);
+        assertThat(first.operation()).isEqualTo("Оплата через СБП ООО РОМАШКА");
+        assertThat(first.type()).isEqualTo("debit");
+        assertThat(first.amount()).isEqualByComparingTo(new BigDecimal("1234.50"));
+    }
+
+    @Test
+    void categorizeAppliesCurrentRules() throws Exception {
+        Long userId = 1L;
+        ParsedStatement parsed = statementOf(debit(1, "2026-09-05", "100.00", "Магазин"));
+        when(parser.version()).thenReturn("test-1.0");
+
+        StatementPreviewResponse preview = doPreview(userId, parsed);
+        assertThat(preview.transactions().get(0).categoryId()).isNull();
+        // Counterparty name is taken from the operation column, not the payment purpose.
+        assertThat(preview.transactions().get(0).operation()).isEqualTo("Магазин");
+
+        Category category = mock(Category.class);
+        when(category.getId()).thenReturn(5L);
+        when(category.getName()).thenReturn("Продукты");
+        Rule rule = new Rule(userId, "продукты", "{\"operation_contains\":\"магазин\"}", 5L, 100, false);
+        when(ruleRepository.findByUserIdOrderByPriorityDescIdAsc(userId)).thenReturn(List.of(rule));
+        when(categoryRepository.findByUserIdOrderByNameAsc(userId)).thenReturn(List.of(category));
+
+        List<StatementPreviewResponse.PreviewTransaction> re = service.categorize(userId, preview.transactions());
+
+        assertThat(re.get(0).categoryId()).isEqualTo(5L);
+        assertThat(re.get(0).categoryName()).isEqualTo("Продукты");
+    }
+
+    @Test
+    void categorizeKeepsManualCategoryEvenWhenRuleMatches() {
+        Long userId = 1L;
+        Category category = mock(Category.class);
+        when(category.getId()).thenReturn(5L);
+        when(category.getName()).thenReturn("Продукты");
+        Rule rule = new Rule(userId, "продукты", "{\"operation_contains\":\"магазин\"}", 9L, 100, false);
+        when(ruleRepository.findByUserIdOrderByPriorityDescIdAsc(userId)).thenReturn(List.of(rule));
+        when(categoryRepository.findByUserIdOrderByNameAsc(userId)).thenReturn(List.of(category));
+
+        StatementPreviewResponse.PreviewTransaction manual = new StatementPreviewResponse.PreviewTransaction(
+                1, LocalDate.of(2026, 9, 5), "Магазин", "Списание", new BigDecimal("100.00"),
+                "debit", 5L, null, true);
+
+        List<StatementPreviewResponse.PreviewTransaction> re = service.categorize(userId, List.of(manual));
+
+        // Manual category 5 wins over the matching rule → 9.
+        assertThat(re.get(0).categoryId()).isEqualTo(5L);
+        assertThat(re.get(0).categoryName()).isEqualTo("Продукты");
     }
 
     @Test
@@ -125,14 +222,14 @@ class StatementServiceTest {
             return manualCard;
         });
 
-        StatementImportResponse resp = service.confirm(userId, preview.draftId(), "2202XXXXXXXX9999");
+        StatementImportResponse resp = service.confirm(userId, confirmRequest(preview, "2202XXXXXXXX9999"));
 
         assertThat(resp.importedCount()).isEqualTo(1);
         verify(cardService).findOrCreateByNumber(userId, "2202XXXXXXXX9999");
     }
 
     @Test
-    void previewShowsCategoriesAndConfirmImportsSkippingDuplicates() throws Exception {
+    void confirmImportsSkippingDuplicates() throws Exception {
         Long userId = 1L;
         ParsedStatement parsed = statementOf(
                 debit(1, "2026-09-05", "100.00", "Магазин А"),
@@ -145,10 +242,8 @@ class StatementServiceTest {
 
         StatementPreviewResponse preview = doPreview(userId, parsed);
         assertThat(preview.validCount()).isEqualTo(2);
-        assertThat(preview.transactions()).hasSize(2);
-        assertThat(preview.skippedDuplicates()).isEqualTo(1);
 
-        StatementImportResponse resp = service.confirm(userId, preview.draftId(), null);
+        StatementImportResponse resp = service.confirm(userId, confirmRequest(preview, null));
 
         assertThat(resp.importedCount()).isEqualTo(1);
         assertThat(resp.skippedDuplicates()).isEqualTo(1);
@@ -170,110 +265,6 @@ class StatementServiceTest {
         assertThat(preview.validCount()).isEqualTo(0);
         assertThat(preview.transactions()).isEmpty();
         assertThat(preview.unrecognizedRows()).hasSize(1);
-    }
-
-    @Test
-    void recategorizeAppliesCurrentRules() throws Exception {
-        Long userId = 1L;
-        ParsedStatement parsed = statementOf(debit(1, "2026-09-05", "100.00", "Магазин"));
-        when(parser.version()).thenReturn("test-1.0");
-
-        StatementPreviewResponse preview = doPreview(userId, parsed);
-        assertThat(preview.transactions().get(0).categoryId()).isNull();
-        // Counterparty name is taken from the operation column, not the payment purpose.
-        assertThat(preview.transactions().get(0).operation()).isEqualTo("Магазин");
-
-        Category category = mock(Category.class);
-        when(category.getId()).thenReturn(5L);
-        when(category.getName()).thenReturn("Продукты");
-        Rule rule = new Rule(userId, "продукты", "{\"operation_contains\":\"магазин\"}", 5L, 100, false);
-        when(ruleRepository.findByUserIdOrderByPriorityDescIdAsc(userId)).thenReturn(List.of(rule));
-        when(categoryRepository.findByUserIdOrderByNameAsc(userId)).thenReturn(List.of(category));
-
-        StatementPreviewResponse re = service.recategorize(userId, preview.draftId());
-
-        assertThat(re.transactions().get(0).categoryId()).isEqualTo(5L);
-        assertThat(re.transactions().get(0).categoryName()).isEqualTo("Продукты");
-    }
-
-    @Test
-    void removeTransactionRemovesRowFromDraft() throws Exception {
-        Long userId = 1L;
-        ParsedStatement parsed = statementOf(
-                debit(1, "2026-09-05", "100.00", "Магазин А"),
-                debit(2, "2026-09-06", "200.00", "Магазин Б"));
-
-        StatementPreviewResponse preview = doPreview(userId, parsed);
-        assertThat(preview.validCount()).isEqualTo(2);
-
-        StatementPreviewResponse after = service.removeTransaction(userId, preview.draftId(), 1);
-
-        assertThat(after.validCount()).isEqualTo(1);
-        assertThat(after.transactions()).hasSize(1);
-        assertThat(after.transactions().get(0).rowNumber()).isEqualTo(2);
-    }
-
-    @Test
-    void assignDraftCategoryMarksManualAndSurvivesRecategorize() throws Exception {
-        Long userId = 1L;
-        ParsedStatement parsed = statementOf(debit(1, "2026-09-05", "100.00", "Магазин"));
-
-        StatementPreviewResponse preview = doPreview(userId, parsed);
-        assertThat(preview.transactions().get(0).categoryId()).isNull();
-
-        Category category = mock(Category.class);
-        when(category.getId()).thenReturn(5L);
-        when(category.getName()).thenReturn("Продукты");
-        when(categoryRepository.findByIdAndUserId(5L, userId)).thenReturn(Optional.of(category));
-        when(categoryRepository.findByUserIdOrderByNameAsc(userId)).thenReturn(List.of(category));
-
-        StatementPreviewResponse assigned = service.assignDraftCategory(userId, preview.draftId(), 1, 5L);
-        assertThat(assigned.transactions().get(0).categoryId()).isEqualTo(5L);
-
-        // A matching rule would categorise to 9; the manual assignment must win.
-        Rule rule = new Rule(userId, "продукты", "{\"operation_contains\":\"магазин\"}", 9L, 100, false);
-        when(ruleRepository.findByUserIdOrderByPriorityDescIdAsc(userId)).thenReturn(List.of(rule));
-
-        StatementPreviewResponse re = service.recategorize(userId, preview.draftId());
-        assertThat(re.transactions().get(0).categoryId()).isEqualTo(5L);
-    }
-
-    @Test
-    void editDraftTransactionUpdatesOperationAmountAndDate() throws Exception {
-        Long userId = 1L;
-        ParsedStatement parsed = statementOf(debit(1, "2026-09-05", "100.00", "Магазин А"));
-
-        StatementPreviewResponse preview = doPreview(userId, parsed);
-        assertThat(preview.transactions().get(0).operation()).isEqualTo("Магазин А");
-
-        StatementPreviewResponse edited = service.editDraftTransaction(
-                userId, preview.draftId(), 1, "Новое имя", new BigDecimal("150.50"),
-                LocalDate.of(2026, 9, 6));
-
-        assertThat(edited.transactions()).hasSize(1);
-        assertThat(edited.transactions().get(0).operation()).isEqualTo("Новое имя");
-        assertThat(edited.transactions().get(0).amount()).isEqualByComparingTo("150.50");
-        assertThat(edited.transactions().get(0).date()).isEqualTo(LocalDate.of(2026, 9, 6));
-    }
-
-    @Test
-    void addDraftTransactionAddsStatementRow() throws Exception {
-        Long userId = 1L;
-        ParsedStatement parsed = statementOf(debit(1, "2026-09-05", "100.00", "Магазин А"));
-
-        StatementPreviewResponse preview = doPreview(userId, parsed);
-        assertThat(preview.validCount()).isEqualTo(1);
-
-        StatementPreviewResponse added = service.addDraftTransaction(
-                userId, preview.draftId(), "Новая операция", new BigDecimal("250.00"), "credit",
-                LocalDate.of(2026, 9, 7));
-
-        assertThat(added.validCount()).isEqualTo(2);
-        assertThat(added.transactions()).hasSize(2);
-        assertThat(added.transactions().get(1).operation()).isEqualTo("Новая операция");
-        assertThat(added.transactions().get(1).amount()).isEqualByComparingTo("250.00");
-        assertThat(added.transactions().get(1).type()).isEqualTo("credit");
-        assertThat(added.transactions().get(1).date()).isEqualTo(LocalDate.of(2026, 9, 7));
     }
 
     @Test
@@ -311,9 +302,10 @@ class StatementServiceTest {
         when(transactionRepository.findExistingFingerprints(anyCollection())).thenReturn(Set.of());
 
         StatementPreviewResponse preview = service.preview(userId, new byte[]{1}, true);
+        assertThat(preview.parserVersion()).isEqualTo("screenshot-1.0");
         assertThat(preview.transactions()).hasSize(1);
 
-        service.confirm(userId, preview.draftId(), null);
+        service.confirm(userId, confirmRequest(preview, null));
 
         ArgumentCaptor<List<Transaction>> captor = ArgumentCaptor.forClass(List.class);
         verify(transactionRepository).saveAll(captor.capture());

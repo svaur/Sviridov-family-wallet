@@ -4,9 +4,13 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 
-/** Step 1/2 payload of the upload wizard: parsed metadata + categorised preview rows. */
+/**
+ * Step 1/2 payload of the upload wizard: parsed metadata + categorised preview
+ * rows. Stateless — the rows are held by the frontend between the preview,
+ * categorise and confirm calls, so there is no draft id.
+ */
 public record StatementPreviewResponse(
-        String draftId,
+        String parserVersion,
         LocalDate periodFrom,
         LocalDate periodTo,
         String cardNumber,
@@ -14,7 +18,6 @@ public record StatementPreviewResponse(
         String account,
         int rowCountRaw,
         int validCount,
-        int skippedDuplicates,
         List<String> warnings,
         List<String> unrecognizedRows,
         List<PreviewTransaction> transactions) {
@@ -27,6 +30,7 @@ public record StatementPreviewResponse(
             BigDecimal amount,
             String type,
             Long categoryId,
-            String categoryName) {
+            String categoryName,
+            boolean categoryManual) {
     }
 }

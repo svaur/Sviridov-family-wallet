@@ -13,8 +13,8 @@ import ru.sviridov.wallet.web.dto.UserResponse;
 /**
  * Profile and credential operations of the signed-in user.
  *
- * <p>Changing the password bumps {@code users.password_changed_at}. Sessions
- * carry the value they saw at login, and {@link ru.sviridov.wallet.security.PasswordEpochFilter}
+ * <p>Changing the password bumps {@code users.session_epoch}. Sessions carry
+ * the value they saw at login, and {@link ru.sviridov.wallet.security.SessionEpochFilter}
  * rejects the stale ones — that is the whole "sign out everywhere" mechanism,
  * and it needs no server-side session registry.</p>
  */

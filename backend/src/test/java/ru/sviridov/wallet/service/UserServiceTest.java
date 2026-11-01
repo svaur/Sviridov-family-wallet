@@ -109,12 +109,12 @@ class UserServiceTest {
     @Test
     void changePasswordReplacesTheHashAndBumpsTheEpoch() {
         User user = existingUser();
-        Instant epochBefore = user.getPasswordChangedAt();
+        Instant epochBefore = user.getSessionEpoch();
 
         service().changePassword(USER_ID, CURRENT, "new-secret-2");
 
         assertThat(passwordEncoder.matches("new-secret-2", user.getPasswordHash())).isTrue();
-        assertThat(user.getPasswordChangedAt()).isAfter(epochBefore);
+        assertThat(user.getSessionEpoch()).isAfter(epochBefore);
         verify(rateLimiter).reset("password|7");
     }
 

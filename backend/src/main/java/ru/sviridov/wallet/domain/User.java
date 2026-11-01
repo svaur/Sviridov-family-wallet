@@ -12,13 +12,14 @@ import java.time.Instant;
 /**
  * Application user. Credentials ({@code username} login + BCrypt
  * {@code passwordHash}) plus an optional human-readable name that the sidebar
- * shows instead of the login. Users are created manually (bootstrap env var or
- * SQL); there is no self-registration.
+ * shows instead of the login. Users are created manually (bootstrap env var,
+ * SQL, or the admin panel); there is no self-registration.
  *
- * <p>{@code passwordChangedAt} is an epoch, not just an audit field: it is
+ * <p>{@code sessionEpoch} is an epoch, not just an audit field: it is
  * snapshotted into the authentication principal at login and compared on every
- * request, so changing the password signs out the other devices without any
- * server-side session registry.</p>
+ * request, so bumping it signs out the other devices without any server-side
+ * session registry. A password change, a ban/unban, an admin password reset and
+ * a forced logout all bump it.</p>
  */
 @Entity
 @Table(name = "users")
@@ -40,8 +41,19 @@ public class User {
     @Column(name = "last_name", length = 64)
     private String lastName;
 
-    @Column(name = "password_changed_at", nullable = false)
-    private Instant passwordChangedAt;
+    @Column(name = "session_epoch", nullable = false)
+    private Instant sessionEpoch;
+
+    /** Set by an admin after a password reset; the wallet forces a change. */
+    @Column(name = "must_change_password", nullable = false)
+    private boolean mustChangePassword;
+
+    /** A banned user cannot sign in; existing sessions are killed via the epoch. */
+    @Column(name = "is_active", nullable = false)
+    private boolean isActive = true;
+
+    @Column(name = "last_login_at")
+    private Instant lastLoginAt;
 
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
@@ -53,7 +65,8 @@ public class User {
         this.username = username;
         this.passwordHash = passwordHash;
         this.createdAt = Instant.now();
-        this.passwordChangedAt = this.createdAt;
+        this.sessionEpoch = this.createdAt;
+        this.isActive = true;
     }
 
     public Long getId() {
@@ -76,8 +89,20 @@ public class User {
         return lastName;
     }
 
-    public Instant getPasswordChangedAt() {
-        return passwordChangedAt;
+    public Instant getSessionEpoch() {
+        return sessionEpoch;
+    }
+
+    public boolean isMustChangePassword() {
+        return mustChangePassword;
+    }
+
+    public boolean isActive() {
+        return isActive;
+    }
+
+    public Instant getLastLoginAt() {
+        return lastLoginAt;
     }
 
     public Instant getCreatedAt() {
@@ -93,6 +118,26 @@ public class User {
     /** Callers encode the password; bumping the epoch is exactly the point. */
     public void changePassword(String newPasswordHash) {
         this.passwordHash = newPasswordHash;
-        this.passwordChangedAt = Instant.now();
+        this.sessionEpoch = Instant.now();
+        this.mustChangePassword = false;
+    }
+
+    /** Admin: force the user to change the password on next login. */
+    public void setMustChangePassword(boolean mustChangePassword) {
+        this.mustChangePassword = mustChangePassword;
+    }
+
+    /** Admin: ban/unban. */
+    public void setActive(boolean active) {
+        this.isActive = active;
+    }
+
+    /** Admin: sign out every session (ban, unban, reset, forced logout). */
+    public void bumpSessionEpoch() {
+        this.sessionEpoch = Instant.now();
+    }
+
+    public void setLastLoginAt(Instant lastLoginAt) {
+        this.lastLoginAt = lastLoginAt;
     }
 }

@@ -40,11 +40,25 @@ final class Api {
         return session;
     }
 
+    /** Reuse an existing session — for tests that log into both SPAs in one cookie. */
+    void useSession(MockHttpSession shared) {
+        this.session = shared;
+    }
+
     MvcResult login(String username, String password) throws Exception {
-        MvcResult result = mvc.perform(MockMvcRequestBuilders.post("/api/auth/login")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(json.writeValueAsString(Map.of("username", username, "password", password))))
-                .andReturn();
+        return loginAt("/api/auth/login", username, password);
+    }
+
+    /** Generic login; the admin panel signs in at a different path. */
+    MvcResult loginAt(String path, String username, String password) throws Exception {
+        MockHttpServletRequestBuilder builder = MockMvcRequestBuilders.post(path)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json.writeValueAsString(Map.of("username", username, "password", password)));
+        // Attach an existing session so the second login lands in the same cookie.
+        if (session != null) {
+            builder.session(session);
+        }
+        MvcResult result = mvc.perform(builder).andReturn();
         if (result.getResponse().getStatus() == 200) {
             session = (MockHttpSession) result.getRequest().getSession(false);
         }

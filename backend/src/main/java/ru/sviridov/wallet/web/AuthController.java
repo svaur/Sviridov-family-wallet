@@ -3,6 +3,7 @@ package ru.sviridov.wallet.web;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpSession;
 import jakarta.validation.Valid;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -27,8 +28,8 @@ public class AuthController {
     private final LoginRateLimiter rateLimiter;
     private final UserService userService;
 
-    public AuthController(AuthenticationManager authenticationManager, LoginRateLimiter rateLimiter,
-                          UserService userService) {
+    public AuthController(@Qualifier("userAuthenticationManager") AuthenticationManager authenticationManager,
+                          LoginRateLimiter rateLimiter, UserService userService) {
         this.authenticationManager = authenticationManager;
         this.rateLimiter = rateLimiter;
         this.userService = userService;
@@ -36,7 +37,7 @@ public class AuthController {
 
     @PostMapping("/login")
     public UserResponse login(@Valid @RequestBody LoginRequest request, HttpServletRequest httpRequest) {
-        String key = request.username() + "|" + clientIp(httpRequest);
+        String key = request.username() + "|" + ClientIp.of(httpRequest);
         if (rateLimiter.isBlocked(key)) {
             throw new TooManyRequestsException("Слишком много попыток входа. Попробуйте через несколько минут.");
         }
@@ -63,15 +64,9 @@ public class AuthController {
         SecurityContextHolder.clearContext();
         HttpSession session = request.getSession(false);
         if (session != null) {
-            session.invalidate();
+            // Remove only the wallet context — the admin context (same cookie,
+            // different attribute) must survive a wallet logout.
+            session.removeAttribute(HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY);
         }
-    }
-
-    private String clientIp(HttpServletRequest request) {
-        String forwarded = request.getHeader("X-Forwarded-For");
-        if (forwarded != null && !forwarded.isBlank()) {
-            return forwarded.split(",")[0].trim();
-        }
-        return request.getRemoteAddr();
     }
 }

@@ -10,6 +10,7 @@ import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 import ru.sviridov.wallet.domain.User;
@@ -20,26 +21,30 @@ import java.io.IOException;
 import java.time.Instant;
 
 /**
- * Rejects a session whose password epoch is stale, which is how "sign out
- * everywhere" works after a password change.
+ * Rejects a session whose epoch is stale, which is how "sign out everywhere"
+ * works after a password change, a ban/unban, an admin password reset or a
+ * forced logout.
  *
  * <p>Runs after Spring Security (default order is lower than the security
  * filter chain) but still inside its request scope, so the context is loaded.
  * The cost is one primary-key lookup per authenticated request — the price of
  * invalidating sessions without a server-side registry.</p>
  *
+ * <p>Only the wallet context is removed, not the whole session: the admin
+ * context may share the same cookie and must survive a wallet epoch change.</p>
+ *
  * <p>Login and logout are exempt: a browser that still holds the stale session
- * cookie must be able to authenticate again, and logout must be able to
- * invalidate the session.</p>
+ * cookie must be able to authenticate again, and logout must be able to clear
+ * the context.</p>
  */
 @Component
 @Order(Ordered.LOWEST_PRECEDENCE)
-public class PasswordEpochFilter extends OncePerRequestFilter {
+public class SessionEpochFilter extends OncePerRequestFilter {
 
     private final UserRepository userRepository;
     private final ObjectMapper objectMapper;
 
-    public PasswordEpochFilter(UserRepository userRepository, ObjectMapper objectMapper) {
+    public SessionEpochFilter(UserRepository userRepository, ObjectMapper objectMapper) {
         this.userRepository = userRepository;
         this.objectMapper = objectMapper;
     }
@@ -58,18 +63,18 @@ public class PasswordEpochFilter extends OncePerRequestFilter {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (authentication != null && authentication.getPrincipal() instanceof AppUser principal) {
             Instant current = userRepository.findById(principal.getId())
-                    .map(User::getPasswordChangedAt)
+                    .map(User::getSessionEpoch)
                     .orElse(null);
-            if (current == null || !current.equals(principal.getPasswordChangedAt())) {
+            if (current == null || !current.equals(principal.getSessionEpoch())) {
                 HttpSession session = request.getSession(false);
                 if (session != null) {
-                    session.invalidate();
+                    session.removeAttribute(HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY);
                 }
                 SecurityContextHolder.clearContext();
                 response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
                 response.setContentType("application/json;charset=UTF-8");
                 objectMapper.writeValue(response.getWriter(), ApiError.of(401, "Unauthorized",
-                        "Сессия завершена после смены пароля. Войдите снова.", request.getRequestURI()));
+                        "Сессия завершена. Войдите снова.", request.getRequestURI()));
                 return;
             }
         }

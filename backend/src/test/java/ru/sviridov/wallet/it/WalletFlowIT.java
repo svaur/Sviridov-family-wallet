@@ -95,9 +95,10 @@ class WalletFlowIT {
         assertThat(anon.get("/api/transactions").isArray()).isTrue();
 
         assertThat(anon.postRaw("/api/auth/logout", Map.of()).getResponse().getStatus()).isEqualTo(200);
-        assertThat(anon.session().isInvalid()).isTrue();
-        assertThat(Api.anonymous(mvc, json).getRaw("/api/transactions").getResponse().getStatus())
-                .isEqualTo(401);
+        // Scoped logout: the wallet context is gone (next request is 401), but
+        // the session itself survives so a coexisting admin session in the same
+        // cookie lives on.
+        assertThat(anon.getRaw("/api/transactions").getResponse().getStatus()).isEqualTo(401);
     }
 
     @Test
@@ -284,6 +285,38 @@ class WalletFlowIT {
 
         assertThat(api.deleteRaw("/api/transactions/" + id).getResponse().getStatus()).isEqualTo(204);
         assertThat(api.get("/api/transactions")).isEmpty();
+    }
+
+    @Test
+    void forcedPasswordChangeAfterAdminReset() throws Exception {
+        // An admin reset flips the flag; the wallet then blocks everything until
+        // the new password is set.
+        String tempUsername = "it-reset-" + UUID.randomUUID().toString().substring(0, 8);
+        User reset = new User(tempUsername, passwordEncoder.encode("temp-password-1"));
+        reset.setMustChangePassword(true);
+        userRepository.save(reset);
+
+        Api client = Api.anonymous(mvc, json);
+        assertThat(client.login(tempUsername, "temp-password-1").getResponse().getStatus()).isEqualTo(200);
+
+        MvcResult blocked = client.getRaw("/api/transactions");
+        assertThat(blocked.getResponse().getStatus()).isEqualTo(403);
+        assertThat(json.readTree(blocked.getResponse().getContentAsString(StandardCharsets.UTF_8))
+                .get("message").asText()).isEqualTo("Требуется смена пароля");
+
+        assertThat(client.get("/api/me").get("mustChangePassword").asBoolean()).isTrue();
+
+        assertThat(client.putRaw("/api/me/password",
+                Map.of("currentPassword", "temp-password-1", "newPassword", "fresh-secret-1"))
+                .getResponse().getStatus()).isEqualTo(204);
+
+        // The change bumped the epoch: the current session is stale.
+        assertThat(client.getRaw("/api/me").getResponse().getStatus()).isEqualTo(401);
+
+        Api fresh = Api.anonymous(mvc, json);
+        assertThat(fresh.login(tempUsername, "fresh-secret-1").getResponse().getStatus()).isEqualTo(200);
+        assertThat(fresh.get("/api/me").get("mustChangePassword").asBoolean()).isFalse();
+        assertThat(fresh.get("/api/transactions").isArray()).isTrue();
     }
 
     // -------------------------------------------------------------- helpers

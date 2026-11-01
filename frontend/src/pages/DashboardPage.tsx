@@ -62,30 +62,35 @@ const CAT_COLORS = ['#6366f1', '#a855f7', '#10b981', '#f59e0b', '#ec4899', '#647
 /** Sentinel id used by the analytics API for the "uncategorized" bucket. */
 const UNCATEGORIZED = 0
 
+const DAY_MS = 86_400_000
+
 function iso(d: Date): string {
   const m = String(d.getMonth() + 1).padStart(2, '0')
   const day = String(d.getDate()).padStart(2, '0')
   return `${d.getFullYear()}-${m}-${day}`
 }
 
-function defaultMonth(): string {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+/** Trailing 30 days — a useful default even on the 1st of a month. */
+function defaultRange(): { from: string; to: string } {
+  const now = new Date()
+  const start = new Date(now.getTime() - 29 * DAY_MS)
+  return { from: iso(start), to: iso(now) }
 }
 
 function shortMonth(month: string): string {
-  const [, m] = month.split('-')
+  const [y, m] = month.split('-')
   const names = ['Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн', 'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек']
-  return names[Number(m) - 1]
+  return `${names[Number(m) - 1]} ${y.slice(2)}`
 }
 
-/** start (month), end (last day), yearStart (11 months before start). */
-function monthRange(m: string) {
-  const [y, mo] = m.split('-').map(Number)
-  const start = new Date(y, mo - 1, 1)
-  const end = new Date(y, mo, 0)
-  const yearStart = new Date(y, mo - 12, 1)
-  return { monthStart: iso(start), monthEnd: iso(end), yearStart: iso(yearStart) }
+/** The period of the same length immediately before [from, to]. */
+function previousRange(from: string, to: string): { from: string; to: string } {
+  const f = new Date(`${from}T00:00:00`)
+  const t = new Date(`${to}T00:00:00`)
+  const days = Math.max(1, Math.round((t.getTime() - f.getTime()) / DAY_MS) + 1)
+  const prevTo = new Date(f.getTime() - DAY_MS)
+  const prevFrom = new Date(prevTo.getTime() - (days - 1) * DAY_MS)
+  return { from: iso(prevFrom), to: iso(prevTo) }
 }
 
 function pct(cur: number, prev: number): string | null {
@@ -96,9 +101,11 @@ function pct(cur: number, prev: number): string | null {
 }
 
 export function DashboardPage() {
-  const [month, setMonth] = useState(defaultMonth())
-  const [yearData, setYearData] = useState<Analytics | null>(null)
-  const [monthData, setMonthData] = useState<Analytics | null>(null)
+  const initial = useMemo(() => defaultRange(), [])
+  const [from, setFrom] = useState(initial.from)
+  const [to, setTo] = useState(initial.to)
+  const [data, setData] = useState<Analytics | null>(null)
+  const [prevData, setPrevData] = useState<Analytics | null>(null)
   const [cards, setCards] = useState<Card[]>([])
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [categories, setCategories] = useState<Category[]>([])
@@ -109,20 +116,25 @@ export function DashboardPage() {
 
   const iconById = useMemo(() => new Map(categories.map((c) => [c.id, c.icon])), [categories])
 
-  async function load(m: string, ex: Set<number>) {
+  async function load(f: string, t: string, ex: Set<number>) {
+    if (!f || !t) return
+    if (f > t) {
+      setError('Дата «с» не может быть позже даты «по»')
+      return
+    }
     setLoading(true)
     setError(null)
-    const { monthStart, monthEnd, yearStart } = monthRange(m)
     const q = ex.size > 0 ? `&exclude=${Array.from(ex).join(',')}` : ''
+    const prevRange = previousRange(f, t)
     try {
-      const [yr, mo, cs, tx] = await Promise.all([
-        api.get<Analytics>(`/api/analytics?from=${yearStart}&to=${monthEnd}${q}`),
-        api.get<Analytics>(`/api/analytics?from=${monthStart}&to=${monthEnd}${q}`),
+      const [period, prevPeriod, cs, tx] = await Promise.all([
+        api.get<Analytics>(`/api/analytics?from=${f}&to=${t}${q}`),
+        api.get<Analytics>(`/api/analytics?from=${prevRange.from}&to=${prevRange.to}${q}`),
         api.get<Card[]>('/api/cards'),
         api.get<Transaction[]>('/api/transactions'),
       ])
-      setYearData(yr)
-      setMonthData(mo)
+      setData(period)
+      setPrevData(prevPeriod)
       setCards(cs)
       setTransactions(tx)
     } catch (e) {
@@ -141,7 +153,7 @@ export function DashboardPage() {
   }
 
   useEffect(() => {
-    load(defaultMonth(), new Set())
+    load(initial.from, initial.to, new Set())
     loadCategories()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -154,39 +166,46 @@ export function DashboardPage() {
       next.add(id)
     }
     setExcluded(next)
-    load(month, next)
+    load(from, to, next)
   }
 
-  function onMonthChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const m = e.target.value
-    setMonth(m)
-    if (m) load(m, excluded)
+  function onFromChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const value = e.target.value
+    setFrom(value)
+    if (value) load(value, to, excluded)
   }
 
-  const monthly = (yearData?.monthly ?? []).map((p) => ({
+  function onToChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const value = e.target.value
+    setTo(value)
+    if (value) load(from, value, excluded)
+  }
+
+  const monthly = (data?.monthly ?? []).map((p) => ({
     month: shortMonth(p.month),
     income: p.income,
     expense: p.expense,
   }))
 
-  const n = (yearData?.monthly ?? []).length
-  const cur = n > 0 ? yearData!.monthly[n - 1] : null
-  const prev = n > 1 ? yearData!.monthly[n - 2] : null
-  const balance = cur ? cur.income - cur.expense : 0
-  const prevBalance = prev ? prev.income - prev.expense : 0
-  const balanceDelta = prev ? balance - prevBalance : 0
+  const income = data?.income ?? 0
+  const expense = data?.expense ?? 0
+  const balance = data?.balance ?? 0
+  const prevIncome = prevData?.income ?? 0
+  const prevExpense = prevData?.expense ?? 0
+  const prevBalance = prevData?.balance ?? 0
+  const balanceDelta = balance - prevBalance
 
-  const topCategories = (monthData?.categories ?? []).slice(0, 6)
+  const topCategories = (data?.categories ?? []).slice(0, 6)
   const maxCat = topCategories.length > 0 ? topCategories[0].amount : 0
 
   const activeCards = cards.filter((c) => !c.archived)
 
   const topPurchases = useMemo(() => {
     return transactions
-      .filter((t) => t.type === 'debit' && !t.isTransfer)
+      .filter((t) => t.type === 'debit' && !t.isTransfer && t.date >= from && t.date <= to)
       .sort((a, b) => Number(b.amount) - Number(a.amount))
       .slice(0, 5)
-  }, [transactions])
+  }, [transactions, from, to])
 
   function updateCommentLocal(id: number, comment: string | null) {
     setTransactions((prev) => prev.map((t) => (t.id === id ? { ...t, comment } : t)))
@@ -196,13 +215,16 @@ export function DashboardPage() {
     <div className="page">
       <div className="page-head">
         <h1>Обзор финансов</h1>
-        <input
-          type="month"
-          className="month-input"
-          value={month}
-          onChange={onMonthChange}
-          aria-label="Период"
-        />
+        <div className="period-filter">
+          <label className="field">
+            <span>с</span>
+            <input type="date" value={from} max={to} onChange={onFromChange} aria-label="Период с" />
+          </label>
+          <label className="field">
+            <span>по</span>
+            <input type="date" value={to} min={from} onChange={onToChange} aria-label="Период по" />
+          </label>
+        </div>
       </div>
 
       {error && <div className="error">{error}</div>}
@@ -214,26 +236,26 @@ export function DashboardPage() {
           <div className="stats">
             <div className="stat">
               <div className="lbl"><span>⬇</span>Доход</div>
-              <div className="val pos">{fmtMoney(cur?.income ?? 0)}</div>
-              {cur && prev && (
-                <div className={`trend ${(cur.income - prev.income) >= 0 ? 'up' : 'down'}`}>
-                  {(cur.income - prev.income) >= 0 ? '▲' : '▼'} {pct(cur.income, prev.income)}
+              <div className="val pos">{fmtMoney(income)}</div>
+              {prevData && (
+                <div className={`trend ${(income - prevIncome) >= 0 ? 'up' : 'down'}`}>
+                  {(income - prevIncome) >= 0 ? '▲' : '▼'} {pct(income, prevIncome)}
                 </div>
               )}
             </div>
             <div className="stat">
               <div className="lbl"><span>⬆</span>Расход</div>
-              <div className="val neg">{fmtMoney(cur?.expense ?? 0)}</div>
-              {cur && prev && (
-                <div className={`trend ${(cur.expense - prev.expense) <= 0 ? 'up' : 'down'}`}>
-                  {(cur.expense - prev.expense) <= 0 ? '▼' : '▲'} {pct(cur.expense, prev.expense)}
+              <div className="val neg">{fmtMoney(expense)}</div>
+              {prevData && (
+                <div className={`trend ${(expense - prevExpense) <= 0 ? 'up' : 'down'}`}>
+                  {(expense - prevExpense) <= 0 ? '▼' : '▲'} {pct(expense, prevExpense)}
                 </div>
               )}
             </div>
             <div className="stat">
               <div className="lbl"><span>≈</span>Баланс</div>
               <div className={`val ${balance >= 0 ? 'pos' : 'neg'}`}>{fmtMoney(balance)}</div>
-              {prev && (
+              {prevData && (
                 <div className={`trend ${balanceDelta >= 0 ? 'up' : 'down'}`}>
                   {balanceDelta >= 0 ? '▲' : '▼'} {balanceDelta >= 0 ? '+' : '−'}{fmtMoney(Math.abs(balanceDelta))}
                 </div>
@@ -250,7 +272,7 @@ export function DashboardPage() {
 
           <div className="grid">
             <section className="card">
-              <h2>Динамика за год</h2>
+              <h2>Динамика за период</h2>
               <ResponsiveContainer width="100%" height={260}>
                 <AreaChart data={monthly}>
                   <defs>
@@ -329,7 +351,7 @@ export function DashboardPage() {
           <section className="card">
             <h2>Самые крупные покупки</h2>
             {topPurchases.length === 0 ? (
-              <p className="muted">Покупок пока нет</p>
+              <p className="muted">Покупок за период нет</p>
             ) : (
               <div>
                 {topPurchases.map((t) => (

@@ -18,6 +18,7 @@ transactions, and shows a dashboard. Everything runs on one VPS via
 | [frontend.md](frontend.md) | React pages, components, routing, design system, shared helpers |
 | [api.md](api.md) | REST endpoint reference |
 | [development.md](development.md) | Build/run/test, toolchain quirks, environment variables |
+| [testing.md](testing.md) | Unit vs integration tests, how to run them, what they cover |
 
 ## 30-second overview
 

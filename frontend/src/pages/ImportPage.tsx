@@ -45,7 +45,7 @@ interface Preview {
 }
 
 interface ImportResult {
-  statementId: number
+  statementId: number | null
   status: string
   rowCountRaw: number
   importedCount: number

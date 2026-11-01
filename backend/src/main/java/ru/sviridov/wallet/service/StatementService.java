@@ -211,18 +211,24 @@ public class StatementService {
 
         String status = request.unrecognizedRows().isEmpty() ? "OK" : "PARTIAL";
 
-        Statement statement = new Statement(cardId, request.periodFrom(), request.periodTo(),
-                request.parserVersion(), status, request.transactions().size(), request.rowCountRaw(),
-                request.cardNumber().trim(), request.contract(), request.account());
-        statement = statementRepository.save(statement);
-
-        for (Transaction t : toSave) {
-            t.setStatementId(statement.getId());
+        // A re-import that is entirely duplicates is not a new statement: keeping
+        // an empty metadata row would pollute the statement list, the overlap
+        // warning and the gap detector with a file that contributed nothing.
+        Long statementId = null;
+        if (!toSave.isEmpty()) {
+            Statement statement = statementRepository.save(new Statement(cardId,
+                    request.periodFrom(), request.periodTo(), request.parserVersion(), status,
+                    toSave.size(), request.rowCountRaw(), request.cardNumber().trim(),
+                    request.contract(), request.account()));
+            statementId = statement.getId();
+            for (Transaction t : toSave) {
+                t.setStatementId(statementId);
+            }
+            transactionRepository.saveAll(toSave);
         }
-        transactionRepository.saveAll(toSave);
         statementGapService.detectGaps(cardId);
 
-        return new StatementImportResponse(statement.getId(), status, request.rowCountRaw(),
+        return new StatementImportResponse(statementId, status, request.rowCountRaw(),
                 toSave.size(), skippedDuplicates, request.warnings(), request.unrecognizedRows());
     }
 

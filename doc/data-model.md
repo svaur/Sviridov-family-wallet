@@ -67,8 +67,9 @@ User rules default to priority `100` (higher = checked first).
 
 ### statements
 `id`, `card_id`, `uploaded_at`, `period_from`, `period_to`, `parser_version`,
-`status` (`OK` / `PARTIAL`), `txn_count`, `row_count_raw`,
-`card_number_extracted`, `contract`, `account`.
+`status` (`OK` / `PARTIAL`), `txn_count` (rows this import actually stored),
+`row_count_raw` (rows the parser saw), `card_number_extracted`, `contract`,
+`account`. A fully duplicate re-import stores no statement row.
 
 The PDF/image itself is **never stored**. "Delete statement" hard-deletes its
 transactions (so a re-upload is not blocked by the dedup tombstones).

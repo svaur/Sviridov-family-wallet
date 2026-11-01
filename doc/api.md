@@ -100,6 +100,10 @@ account, rowCountRaw, warnings[], unrecognizedRows[], transactions[]`.
 `cardNumber` may be empty when the parser could not extract it — the user types
 it in the wizard.
 
+`StatementImportResponse`: `statementId, status, rowCountRaw, importedCount,
+skippedDuplicates, warnings[], unrecognizedRows[]`. `statementId` is `null` when
+every row was a duplicate — no statement row is created in that case.
+
 Upload limit: 10 MB (`spring.servlet.multipart`); 413 beyond that.
 
 ## Statement gaps (`/api/statement-gaps`)

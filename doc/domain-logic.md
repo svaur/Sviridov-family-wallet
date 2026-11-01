@@ -48,10 +48,15 @@ creates/changes a rule mid-import.
    manual pick or engine result, `setCategoryManual`, `fingerprint(...)`.
 3. Dedup: `findExistingFingerprints` (includes soft-deleted rows) → skip
    duplicates, count `skippedDuplicates`.
-4. Save `Statement` + `saveAll(transactions)`.
+4. **Only when at least one row is new**: save `Statement` (`txn_count` =
+   rows actually stored, not rows in the file) + point the rows at it +
+   `saveAll(transactions)`. A re-import that is entirely duplicates creates
+   no statement row — it would pollute the statement list, the overlap
+   warning and the gap detector while contributing nothing.
 5. `StatementGapService.detectGaps(cardId)`.
 6. Build `StatementImportResponse(statementId, status, rowCountRaw,
-   importedCount, skippedDuplicates, warnings, unrecognizedRows)`.
+   importedCount, skippedDuplicates, warnings, unrecognizedRows)`;
+   `statementId` is `null` when nothing was imported.
 
 `status = unrecognizedRows.isEmpty() ? "OK" : "PARTIAL"`.
 

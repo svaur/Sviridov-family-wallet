@@ -19,6 +19,9 @@ docker-compose.yml  postgres + backend + frontend (nginx)
 - Docker + Docker Compose — all you need for the containerised run.
 - Local development only: Java 21, Maven 3.9+, Node.js 22.5+ and pnpm 11.
   (pnpm 11 uses Node's built-in `node:sqlite`, which requires Node ≥ 22.5.)
+- Screenshot import uses Tesseract OCR — installed inside the Docker image
+  (`apk add tesseract-ocr tesseract-ocr-data-rus`); for a non-Docker local run, install
+  `tesseract-ocr` with the `rus` language pack yourself.
 
 ## Build & run (Docker)
 
@@ -31,7 +34,7 @@ docker-compose.yml  postgres + backend + frontend (nginx)
      - **postgres** on `:5432`
    - App: `http://localhost` · Swagger UI: `http://localhost/swagger-ui.html`
    - Health: `GET http://localhost:8080/actuator/health`
-   - On first start, Flyway creates the full schema (V1–V9); if `BOOTSTRAP_USERNAME` /
+   - On first start, Flyway creates the full schema (V1–V10); if `BOOTSTRAP_USERNAME` /
      `BOOTSTRAP_PASSWORD` are set, the first user is created automatically.
 3. Rebuild after changes: `docker compose up --build --force-recreate`.
 4. Stop: `docker compose down` (add `-v` to also wipe the database volume).
@@ -74,17 +77,20 @@ Rules (flat optional conditions, implicit AND — `operation_contains`/`operatio
 - `GET /api/rules` · `POST /api/rules` · `PUT /api/rules/{id}` · `DELETE /api/rules/{id}`
 - `POST /api/rules/apply` — re-apply rules to all transactions (skips manually-categorised)
 
-Statements (3-step PDF upload wizard, ≤10 MB, PDF not stored):
-- `POST /api/statements/preview` — multipart `file`; parse + validate + categorise → draft preview
+Statements (3-step upload wizard, ≤10 MB, PDF not stored):
+- `POST /api/statements/preview` — multipart `file` + optional `kind` (`statement` default | `screenshot` for a bank-feed screenshot image); parse + validate + categorise → draft preview
 - `POST /api/statements/preview/{draftId}/recategorize` — re-apply rules to the draft
 - `DELETE /api/statements/preview/{draftId}/transactions/{rowNumber}` — remove a row from the draft
+- `PUT /api/statements/preview/{draftId}/transactions/{rowNumber}` — edit a draft row (`operation`, `amount`, `date`)
+- `POST /api/statements/preview/{draftId}/transactions` — add a row to a screenshot draft (`operation`, `amount`, `type`, `date`)
 - `POST /api/statements/preview/{draftId}/transactions/{rowNumber}/category` — manual category in the draft
-- `POST /api/statements/preview/{draftId}/confirm` — import (dedup, save statement + transactions)
+- `POST /api/statements/preview/{draftId}/confirm?cardNumber=…` — import (dedup, save statement + transactions); `cardNumber` is used only when the card number could not be extracted from the document
 - `GET /api/statements` — upload history (all cards)
+- `DELETE /api/statements/{id}` — delete a statement together with its imported transactions (hard delete, so a re-upload imports them fresh)
 - `GET /api/statement-gaps` — detected gaps between statements
 
 Transactions:
-- `GET /api/transactions` — list my transactions
+- `GET /api/transactions` — list my transactions (`source`: `statement` | `screenshot` | `card` | `cash` | `other`)
 - `POST /api/transactions` — manual entry (`source` = card|cash|other)
 - `DELETE /api/transactions/{id}` — soft-delete
 - `POST /api/transactions/{id}/category` — assign category manually
@@ -108,7 +114,10 @@ Login is rate-limited: 5 failed attempts per username+IP within 5 minutes → `4
 - Stage 6 (done): frontend UX/design rework (sidebar app shell).
 - Stage 7 (partly done): nginx reverse proxy (no TLS yet), OpenAPI/Swagger, login rate-limit — done;
   TLS, JSON logs and production hardening — pending (see checklist below).
-- Stage 8 (optional): notifications center, rule learning, mobile app.
+- Stage 8 (done): bank-feed screenshot import (Tesseract OCR) — a fallback for banks that
+  generate statements incorrectly; parses the transaction list screenshot (card number,
+  amounts with `+`/`-`, merchant + category joined into «операция», «назначение платежа» left empty).
+- Stage 9 (optional): notifications center, rule learning, mobile app.
 
 ## Production checklist (remaining Stage 7)
 

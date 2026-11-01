@@ -16,12 +16,15 @@
 
 - Secrets only via env / docker secrets; never commit real passwords or PII.
 - Test PDFs must be sanitized (no real personal data).
+- Before committing, check the changed data for personal data, API keys and other
+  sensitive information. If any is found — stop the commit and get my explicit
+  approval to commit.
 
 ## Categorization
 
 - Auto-application of rules and the manual "apply rules" button must NOT overwrite
   a manually assigned category. Manual (explicit) category assignment is protected
-  from rules. Implement this protection in Stage 5.
+  from rules (implemented in Stage 5 via `transactions.category_manual`).
 
 ## Other
 

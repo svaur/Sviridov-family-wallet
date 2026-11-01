@@ -6,7 +6,7 @@ schema is owned by migrations, not by Hibernate.
 All timestamps are `TIMESTAMPTZ` (UTC in DB, rendered Europe/Moscow in the UI).
 Every user-owned table is scoped by `user_id`; services always check ownership.
 
-## Migrations (V1–V11)
+## Migrations (V1–V14)
 
 | # | File | What it does |
 |---|---|---|
@@ -21,6 +21,9 @@ Every user-owned table is scoped by `user_id`; services always check ownership.
 | V9 | `V9__category_icon.sql` | `categories.icon VARCHAR(8) DEFAULT '📦'` |
 | V10 | `V10__screenshot_source.sql` | check allows `'screenshot'` |
 | V11 | `V11__excluded_category.sql` | `categories.is_excluded` + seed one "исключено" per user |
+| V12 | `V12__user_profile.sql` | `users.first_name`, `last_name`, `password_changed_at` |
+| V13 | `V13__admins_and_user_management.sql` | `admins` table; `users.must_change_password`, `is_active`, `last_login_at`; rename `password_changed_at` → `session_epoch` |
+| V14 | `V14__audit_log_rework.sql` | `audit_log.user_id` nullable + `ON DELETE SET NULL`; `actor_kind`/`actor_id`/`ip`; index on `at` |
 
 **Rule when you change the schema:** add a new `Vn__*.sql`, never edit an
 applied migration (Flyway validates checksums).
@@ -29,14 +32,27 @@ applied migration (Flyway validates checksums).
 
 ### users
 `id`, `username` (unique), `password_hash` (BCrypt), `first_name`, `last_name`,
-`password_changed_at`, `created_at`.
+`session_epoch`, `must_change_password`, `is_active` (default true),
+`last_login_at`, `created_at`.
 No self-registration — users are created by `AdminUserBootstrap`
-(`BOOTSTRAP_USERNAME` / `BOOTSTRAP_PASSWORD`) or manually in SQL.
+(`BOOTSTRAP_USERNAME` / `BOOTSTRAP_PASSWORD`), by the admin panel, or manually in SQL.
 
 `first_name`/`last_name` are optional display data used by the sidebar (the login
-itself is immutable). `password_changed_at` is an **epoch**, not an audit field:
-it is snapshotted into the session at login and compared on every request, so a
-password change invalidates all sessions without a server-side session registry.
+itself is immutable). `session_epoch` is an **epoch**, not an audit field: it is
+snapshotted into the session at login and compared on every request, so a password
+change, ban, unban or forced logout invalidates all sessions without a server-side
+session registry. `must_change_password` (set on creation and on an admin password
+reset) gates the wallet to the change-password screen until a new password is
+chosen. `is_active=false` = banned — the next login returns 401 «Аккаунт
+заблокирован».
+
+### admins
+`id`, `username` (unique), `password_hash` (BCrypt), `must_change_password`
+(default true on bootstrap), `is_active` (default true), `last_login_at`,
+`created_at`.
+Admins are a **separate realm** — an admin cannot log into the wallet and a
+wallet user cannot log into the admin site. Created by `AdminBootstrap`
+(`ADMIN_USERNAME` / `ADMIN_PASSWORD`, `must_change_password=true`).
 
 ### cards
 `id`, `user_id`, `display_name`, `card_number VARCHAR(20)`, `last4`,
@@ -101,6 +117,13 @@ Invariants:
 A gap is a pause between consecutive statements of one card longer than
 `app.gap.days` (default 7). Idempotent via `(card_id, gap_from, gap_to)`.
 
-### notifications, audit_log
-Created upfront, **not used yet** (Stage 8 backlog: in-app notifications,
-audit trail).
+### audit_log
+`id`, `user_id` (nullable, `ON DELETE SET NULL`), `entity`, `entity_id`,
+`action`, `old_value`/`new_value` (JSONB), `at`, `actor_kind`, `actor_id`, `ip`.
+Filled **only** by admin actions (`AuditService`): `user_id` is always `null`
+for admin entries (the actor is the admin, kept in `actor_id`); the target user
+id is stored durably in `entity_id`, and the target username is captured in
+`new_value = {"username":"…"}` so the trail survives user deletion.
+
+### notifications
+Created upfront, **not used yet** (backlog: in-app notifications).

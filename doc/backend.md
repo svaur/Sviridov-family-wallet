@@ -10,7 +10,9 @@ entities + repositories) → `parser` (file parsing) → `security` / `config`.
 
 | Class | Notes |
 |---|---|
-| `User` | `id`, `username`, `passwordHash`, `createdAt` |
+| `User` | `id`, `username`, `passwordHash`, `firstName`, `lastName`, `sessionEpoch`, `mustChangePassword`, `isActive`, `lastLoginAt`, `createdAt` |
+| `Admin` | separate admin realm: `username`, `passwordHash`, `mustChangePassword`, `isActive`, `lastLoginAt`, `createdAt` |
+| `AuditLog` | admin action trail: `entity`/`entityId`/`action`/`oldValue`/`newValue` (JSON), `actorKind`/`actorId`/`ip`, `at` |
 | `Card` | `cardNumber`, `last4`, `displayName`, `currency`; created automatically |
 | `Category` | `name`, `icon` (emoji), `parentId` |
 | `Rule` | `params` as `String` JSONB (`@JdbcTypeCode(SqlTypes.JSON)`), `priority` |
@@ -47,14 +49,23 @@ Repositories are Spring Data JPA. Two queries are worth knowing:
 | `StatementGapService` | `detectGaps(cardId)` after confirm/delete |
 | `AnalyticsService` | KPI + monthly + category aggregation with excludes |
 | `LoginRateLimiter` | in-memory 5 attempts / 5 min per `username|ip`; expired keys are dropped and the map is swept past `MAX_KEYS` |
+| `UserService` | profile get/update; password change (verifies current, bumps epoch, rate-limited) |
+| `AdminService` | `get` + `recordLogin` for the admin realm |
+| `AdminUserService` | admin CRUD + ban/unban/reset-password/force-logout/delete over users; writes an audit row per action |
+| `AuditService` | `record(entity, entityId, action, username, actorId, ip)` + paged `list` (extracts username from `new_value`) |
+| `ServerStatusService` | counts, DB liveness (`SELECT 1`), uptime, JVM/disk, last import |
 
 ### `web/` — controllers + DTOs + errors
 
-- `AuthController` (`/api/auth`), `CardController` (`/api/cards`),
-  `CategoryController` (`/api/categories`), `RuleController` (`/api/rules`),
-  `TransactionController` (`/api/transactions`), `StatementController`
-  (`/api/statements`), `StatementGapController` (`/api/statement-gaps`),
-  `AnalyticsController` (`/api/analytics`), `RootController` (`/api`).
+- `AuthController` (`/api/auth`), `MeController` (`/api/me`), `CardController`
+  (`/api/cards`), `CategoryController` (`/api/categories`), `RuleController`
+  (`/api/rules`), `TransactionController` (`/api/transactions`),
+  `StatementController` (`/api/statements`), `StatementGapController`
+  (`/api/statement-gaps`), `AnalyticsController` (`/api/analytics`),
+  `RootController` (`/api`).
+- Admin realm: `AdminAuthController` (`/api/admin/auth`), `AdminUserController`
+  (`/api/admin/users`), `AdminAuditController` (`/api/admin/audit`),
+  `AdminStatusController` (`/api/admin/status`).
 - DTOs are immutable `record`s with a static `from(entity)` where useful.
 - Errors: `ApiError` record + `GlobalExceptionHandler`
   (`MethodArgumentNotValidException` → 400 with `fieldErrors`,
@@ -64,13 +75,19 @@ Repositories are Spring Data JPA. Two queries are worth knowing:
 
 ### `security/`
 
-- `SecurityConfig` — stateless-read session cookies, CSRF off, JSON 401/403.
-- `AppUser` — `UserDetails` with `id`; `AppUserDetailsService` loads from DB.
+- `SecurityConfig` — wallet chain (`@Order(2)`, `denyAll` on `/admin/**`), JSON 401/403, `userAuthenticationManager`.
+- `AdminSecurityConfig` — admin chain (`@Order(1)`, `/admin/**` + `/api/admin/**`, `ROLE_ADMIN`), `ADMIN_SECURITY_CONTEXT_KEY`, `adminAuthenticationManager`.
+- `AppUser` / `AppAdmin` — `UserDetails` with `id`; `AppUserDetailsService` / `AdminDetailsService` load from `users` / `admins`.
+- `SessionEpochFilter` — rejects a stale `sessionEpoch` (401), removing only the wallet context so a coexisting admin session survives.
+- `MustChangePasswordFilter` — 403 «Требуется смена пароля» while `must_change_password` is true.
 
 ### `config/`
 
-- `AdminUserBootstrap` — `CommandLineRunner` creating the bootstrap user when
-  `BOOTSTRAP_USERNAME`/`BOOTSTRAP_PASSWORD` are set (password ≥ 8 chars).
+- `AdminUserBootstrap` — `CommandLineRunner` creating the bootstrap wallet user
+  when `BOOTSTRAP_USERNAME`/`BOOTSTRAP_PASSWORD` are set (password ≥ 8 chars).
+- `AdminBootstrap` — `CommandLineRunner` creating the bootstrap admin when
+  `ADMIN_USERNAME`/`ADMIN_PASSWORD` are set (password ≥ 8 chars,
+  `must_change_password=true`).
 
 ## Conventions
 
@@ -88,13 +105,15 @@ Repositories are Spring Data JPA. Two queries are worth knowing:
 
 - `DB_URL` / `DB_USERNAME` / `DB_PASSWORD` (defaults for local dev).
 - `COOKIE_SECURE` (false locally, true behind TLS).
-- `BOOTSTRAP_USERNAME` / `BOOTSTRAP_PASSWORD`.
+- `BOOTSTRAP_USERNAME` / `BOOTSTRAP_PASSWORD`; `ADMIN_USERNAME` / `ADMIN_PASSWORD`.
+- `info.app.version` (default 0.1.0, shown in the server status).
 - `app.gap.days` (default 7).
 - `spring.servlet.multipart.max-file-size` = 10 MB.
 - `springdoc.swagger-ui.path` = `/swagger-ui.html`.
 
 ## Tests
 
-`mvn test` — 82 tests (1 skipped: the end-to-end OCR test needs a local
-Tesseract). Unit tests use plain JUnit 5 + AssertJ + Mockito; there is no
-Spring context in most tests (services are constructed manually with mocks).
+`mvn test` — 148 tests (1 skipped: the end-to-end OCR test needs a local
+Tesseract); `mvn verify` adds 17 integration tests on Testcontainers. Unit tests
+use plain JUnit 5 + AssertJ + Mockito; there is no Spring context in most tests
+(services are constructed manually with mocks).

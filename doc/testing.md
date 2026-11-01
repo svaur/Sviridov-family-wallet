@@ -12,7 +12,7 @@ mvn verify      # unit tests + *IT (Testcontainers PostgreSQL) + failsafe
 ```
 
 `mvn test` is the day-to-day loop (~5 s). `mvn verify` additionally starts a
-throwaway `postgres:16-alpine` container, runs Flyway V1–V11 against it and drives
+throwaway `postgres:16-alpine` container, runs Flyway V1–V14 against it and drives
 the app through MockMvc (~20–40 s including container start).
 
 Two environment facts `mvn verify` depends on:
@@ -47,6 +47,10 @@ through HTTP:
 | Category validation | `CategoryServiceTest` | emoji allow-list, lazy "исключено" seeding, system category protection, flush-before-re-categorise |
 | Transactions | `TransactionServiceTest` | dedup, fingerprint stability, soft-delete tombstone, edit |
 | Profile & password | `UserServiceTest` | name trimming/blank → null, wrong current password + rate-limit failure, same-password rejection, hash replacement and epoch bump, blocked after 5 failures |
+| Admin auth | `AdminServiceTest` | `get` → response, unknown → NotFound, `recordLogin` stamps `lastLoginAt` |
+| Admin user management | `AdminUserServiceTest` | create/ban/unban/reset-password/force-logout/delete + `audit.record(...)` on mutating actions |
+| Audit | `AuditServiceTest` | username captured in `new_value`, list maps + tolerates unparsable JSON |
+| Server status | `ServerStatusServiceTest` | counts + `dbStatus` ok/error |
 | Statements | `StatementServiceTest` | import counts, duplicate skipping, partial status |
 | Cards | `CardServiceTest` | number → `last4`, duplicate numbers, rename, delete |
 | Analytics | `AnalyticsServiceTest` | totals, exclusions, monthly buckets |
@@ -64,7 +68,7 @@ screenshot OCR via the CLI); the Docker image always has it.
 that runs the real security filter chain, the real controllers/JSON contract,
 the real repositories (all JPQL/derived queries) and the real Flyway schema.
 
-Seven client paths:
+Eight client paths in `WalletFlowIT`:
 
 | Test | Path it walks |
 |---|---|
@@ -75,6 +79,14 @@ Seven client paths:
 | `analyticsTotalsAndExclusions` | totals, `exclude=0` sentinel, «исключено» category drops rows |
 | `manualTransactionLifecycle` | manual create, edit, comment, invalid edit 400, delete |
 | `profileAndPasswordChange` | save name → `/api/me`; short/new-password validation; wrong current password 400; change 204 → own session 401; old password rejected, new one logs in |
+| `forcedPasswordChangeAfterAdminReset` | admin resets the password → login with the temp password → wallet call 403 «Требуется смена пароля» → change 204 → own session 401 → re-login with the new password works |
+
+Two more IT classes cover the admin realm on the same Testcontainers context:
+`AdminAuthIT` (admin login/logout/me, wallet↔admin isolation, wallet + admin
+sessions coexisting in one cookie) and `AdminUserIT` (user CRUD, ban/unban,
+reset-password, force-logout, and the audit/status path). Admin tests isolate
+themselves with `userRepository.deleteAll(); adminRepository.deleteAll();` in
+`@BeforeEach` because the admin panel sees a **global** namespace.
 
 `it/Api.java` is a small package-private helper around MockMvc (session cookie,
 JSON verbs, multipart upload) so each test reads as a sequence of API calls.

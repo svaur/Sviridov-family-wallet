@@ -34,8 +34,9 @@ docker-compose.yml  postgres + backend + frontend (nginx)
      - **postgres** on `:5432`
    - App: `http://localhost` · Swagger UI: `http://localhost/swagger-ui.html`
    - Health: `GET http://localhost:8080/actuator/health`
-   - On first start, Flyway creates the full schema (V1–V10); if `BOOTSTRAP_USERNAME` /
-     `BOOTSTRAP_PASSWORD` are set, the first user is created automatically.
+   - On first start, Flyway creates the full schema (V1–V14); if `BOOTSTRAP_USERNAME` /
+     `BOOTSTRAP_PASSWORD` are set, the first wallet user is created, and
+     `ADMIN_USERNAME` / `ADMIN_PASSWORD` create the first admin.
 3. Rebuild after changes: `docker compose up --build --force-recreate`.
 4. Stop: `docker compose down` (add `-v` to also wipe the database volume).
 
@@ -59,6 +60,17 @@ docker-compose.yml  postgres + backend + frontend (nginx)
   VALUES ('family', '$2a$10$<bcrypt-hash>');  -- generate with htpasswd -bnBC 10 "" <password> | tr -d ':\n'
   ```
 - Endpoints: `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/me`, `PUT /api/me/profile`, `PUT /api/me/password`.
+
+## Admin panel
+
+A separate site at `http://localhost/admin` (its own bundle and login) for managing
+the wallet: create/ban/unban/reset-password/delete users, view the audit log and the
+server status. Admins are a separate realm (`admins` table) — an admin cannot log into
+the wallet and a user cannot log into the admin site. Bootstrap the first admin with
+`ADMIN_USERNAME` / `ADMIN_PASSWORD` (it must change its password on first login).
+Endpoints: `POST /api/admin/auth/login`, `GET /api/admin/auth/me`,
+`POST /api/admin/auth/logout`, `/api/admin/users*`, `GET /api/admin/audit`,
+`GET /api/admin/status`.
 
 ## API
 
@@ -117,6 +129,8 @@ Login is rate-limited: 5 failed attempts per username+IP within 5 minutes → `4
 - Stage 8 (done): bank-feed screenshot import (Tesseract OCR) — a fallback for banks that
   generate statements incorrectly; parses the transaction list screenshot (card number,
   amounts with `+`/`-`, merchant + category joined into «операция», «назначение платежа» left empty).
+- Admin panel (done): a separate `/admin` site with its own auth realm — user management
+  (create/ban/unban/reset-password/delete, each audited), audit log, server status.
 - Stage 9 (optional): notifications center, rule learning, mobile app.
 
 ## Production checklist (remaining Stage 7)
@@ -132,6 +146,9 @@ Deferred on purpose — add when going live:
    - `restart: unless-stopped` on all services.
    - Stop publishing `postgres:5432` and `backend:8080` to the host — reach them only through nginx.
    - Run containers as non-root users; drop `BOOTSTRAP_*` after the first user is created.
+   - **Protect the admin panel**: the admin can delete every user's data, so restrict `/admin`
+     by IP in nginx (`allow`/`deny`) or put it behind an extra auth/2FA layer, and delete
+     `ADMIN_*` env vars after the first admin exists.
 4. **Backups.** A cron `pg_dump` of the `postgres` volume with rotation (e.g. keep 14 daily dumps).
 
 ## Notes

@@ -12,7 +12,7 @@ transactions, and shows a dashboard. Everything runs on one VPS via
 | Doc | What it answers |
 |---|---|
 | [architecture.md](architecture.md) | What the system is made of, how a request flows, how it is deployed |
-| [data-model.md](data-model.md) | Database tables, columns, invariants, Flyway migrations V1–V11 |
+| [data-model.md](data-model.md) | Database tables, columns, invariants, Flyway migrations V1–V14 |
 | [domain-logic.md](domain-logic.md) | The non-obvious business rules: import pipeline, dedup/fingerprint, categorization, excluded category, gap detection, screenshot OCR |
 | [backend.md](backend.md) | Java package layout, every service/controller and its responsibility |
 | [frontend.md](frontend.md) | React pages, components, routing, design system, shared helpers |
@@ -52,7 +52,7 @@ backend/            Spring Boot service
     web/            REST controllers, DTOs, error handling
     security/       Spring Security config, UserDetails
     config/         bootstrap (admin user creation)
-  src/main/resources/db/migration/   Flyway V1–V11
+  src/main/resources/db/migration/   Flyway V1–V14
 frontend/           React + Vite SPA (+ nginx.conf, Dockerfile)
 docker-compose.yml  postgres + backend + frontend(nginx)
 doc/                this documentation

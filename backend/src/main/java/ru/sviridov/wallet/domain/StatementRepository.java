@@ -6,10 +6,13 @@ import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Optional;
 
 public interface StatementRepository extends JpaRepository<Statement, Long> {
 
     List<Statement> findByCardIdOrderByIdDesc(Long cardId);
+
+    Optional<Statement> findTopByOrderByUploadedAtDesc();
 
     @Query("""
             select s from Statement s

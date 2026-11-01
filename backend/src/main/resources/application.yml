@@ -48,3 +48,7 @@ springdoc:
     operations-sorter: alpha
   api-docs:
     path: /v3/api-docs
+
+info:
+  app:
+    version: 0.1.0

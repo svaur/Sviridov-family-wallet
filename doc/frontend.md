@@ -17,6 +17,7 @@ production.
   /import                       ImportPage (?kind=screenshot for OCR mode)
   /rules                        RulesPage
   /settings                     SettingsPage
+  /change-password              ForcePasswordChangePage (forced after an admin reset)
   *                             → Navigate to "/"
 ```
 
@@ -25,6 +26,8 @@ production.
 `401` from `api.ts` dispatches `wallet:unauthorized`; `AuthProvider` clears the
 user on it, so a session killed elsewhere (password change, server restart)
 lands on the login page instead of leaving error banners on every screen.
+`RequireAuth` also redirects to `/change-password` when `user.mustChangePassword`
+is true (set after an admin password reset).
 
 ## Shell
 
@@ -43,6 +46,7 @@ set. The name is shown **only** here — the dashboard has no greeting.
 | `TransactionsPage` | feed with client-side filters (search/type/category/source); category pill with icon; "исключено" (muted) when the category is the system excluded one; expanded row: CategoryPicker, inline edit of operation/amount/date, rule form, delete; "+ Добавить операцию" manual form (hidden behind a button) |
 | `StatementsPage` | "+ Загрузить выписку" / "+ Загрузить скрин ленты"; upload-history table with inline card rename, status badges, delete statement (hard delete); "Пропуски в выписках" table |
 | `SettingsPage` | two cards: «Профиль» (Имя/Фамилия, save disabled until changed, inline "Сохранено", shows the resulting `displayName`) and «Безопасность» (current/new/repeat password; client checks length ≥ 8, mismatch and "same as current"; on success logs out and lands on `/login` with "Пароль изменён. Войдите снова.") |
+| `ForcePasswordChangePage` | standalone change-password card (no shell) shown when `mustChangePassword`; temp+new+repeat with client checks, then `PUT /api/me/password` → logout → `/login` |
 | `CardsPage` | card CRUD: list (номер/название/валюта/дата), "+ Добавить карту", inline edit form (number + name), delete with a confirm that warns about the cascade |
 | `ImportPage` | 3-step stateless wizard: choose file → preview/edit rows → confirm. Holds rows in React state; edits/deletes/adds are local; "Применить правила" calls `POST /api/statements/categorize`; import calls `POST /api/statements/confirm`. Screenshot mode (`?kind=screenshot`) shows a red warning banner and accepts images. If the card number was not recognized, step 2 shows a card picker (existing cards from `GET /api/cards` + "＋ Новая карта" manual entry) and "Далее" is disabled until a card is chosen |
 | `RulesPage` | categories as chips (click to edit, × to delete, icon picker); rules table; "Создать правило" form with flat conditions (Назначение платежа / Операция with regex auto-detect, sum range, day range); "Применить правила" button (`POST /api/rules/apply`) |
@@ -60,6 +64,9 @@ set. The name is shown **only** here — the dashboard has no greeting.
 
 ## Helpers
 
+- `http.ts` — the shared fetch core: `createApi({loginPath, unauthorizedEvent})`
+  returns a typed `HttpClient` and dispatches a custom event on 401 outside the
+  login path. `api.ts` (wallet) and `admin/api.ts` (admin) are thin wrappers.
 - `api.ts` — `api.get/post/put/del/upload`; `HttpError` with `status` +
   `fieldErrors`; JSON error body parsing.
 - `format.ts` — `fmtDate` (`DD.MM.YYYY`), `fmtInstant` (`Europe/Moscow`),
@@ -79,6 +86,32 @@ Cards: radius 14px; buttons/inputs: radius 9px; badges: pill 999px.
 Keep class names stable across pages (`.page`, `.card`, `.card-head`, `.table`,
 `.pill`, `.badge-*`, `.amount`, `.tx-row.open`, `.rule-quick-form`,
 `.category-filter`, `.icon-picker`, …).
+
+## Admin SPA (`src/admin/`)
+
+A separate bundle and entry (`admin.html` → `src/admin/main.tsx`), served at
+`/admin` by nginx and built alongside the wallet (`vite.config.ts` declares two
+`build.rollupOptions.input` entries). It uses a `HashRouter` so all sub-routes
+are client-side and nginx only needs one `/admin → admin.html` mapping.
+
+- Auth is independent: `admin/api.ts` = `createApi({ loginPath:
+  '/api/admin/auth/login', unauthorizedEvent: 'admin:unauthorized' })`; state
+  lives in `AdminAuthContext.tsx` (`AdminUser{id, username, mustChangePassword}`),
+  never shared with the wallet `AuthContext`.
+- Routes (`AdminApp.tsx`): `/login` → `AdminLoginPage`; nested `/` under
+  `RequireAdmin` + `AdminLayout` with `index` → `AdminHomePage` («Обзор»),
+  `users` → `AdminUsersPage`, `audit` → `AdminAuditPage`, `server` →
+  `AdminServerPage`.
+- `AdminLayout.tsx`: sidebar brand «Админ», group «Управление» with «Обзор» /
+  «👥 Пользователи» / «📋 Аудит» / «🖥 Сервер», bottom avatar + username + logout.
+- `AdminUsersPage.tsx`: user table (Логин/Имя/Статус/Последний вход/Действия),
+  create form, ban/unban, reset-password (shows the one-time temp password in a
+  `.notice`), force-logout, two-step inline delete confirm.
+- `AdminAuditPage.tsx`: audit table (Время/Действие/Объект/IP) with «← Назад» /
+  «Вперёд →» pagination over `GET /api/admin/audit`.
+- `AdminServerPage.tsx`: «Состояние» card (`.kv` grid: версия, БД, аптайм,
+  последний импорт, JVM, диск) + «Данные» card (`.stats` grid of counts),
+  «Обновить» button.
 
 ## Conventions
 

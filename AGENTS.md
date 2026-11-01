@@ -35,6 +35,16 @@
   decision was made (and what would break otherwise), not what the line does.
   Prioritise `parser/`, `service/` and any geometric/threshold logic.
 
+## Backend state
+
+- Follow a **stateless** approach on the backend: no per-request state kept in
+  process memory (in-memory drafts, caches, counters, session-like stores).
+  State belongs in the database or in the browser; a request must be answerable
+  by any instance and must survive a restart.
+- If a requirement genuinely cannot be implemented statelessly, **stop and ask
+  me for explicit permission** before adding in-process state, and document the
+  trade-off where the state lives.
+
 ## Other
 
 - Do not use the term MVP when working on new parts and features of the project.

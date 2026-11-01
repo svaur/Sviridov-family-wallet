@@ -16,6 +16,7 @@ import ru.sviridov.wallet.security.AppUser;
 import ru.sviridov.wallet.service.TransactionService;
 import ru.sviridov.wallet.web.dto.CategoryAssignRequest;
 import ru.sviridov.wallet.web.dto.CommentRequest;
+import ru.sviridov.wallet.web.dto.TransactionEditRequest;
 import ru.sviridov.wallet.web.dto.TransactionRequest;
 import ru.sviridov.wallet.web.dto.TransactionResponse;
 
@@ -54,6 +55,15 @@ public class TransactionController {
                                                               @PathVariable Long id,
                                                               @Valid @RequestBody CategoryAssignRequest request) {
         TransactionResponse updated = transactionService.assignCategory(user.getId(), id, request.categoryId());
+        return ResponseEntity.ok(updated);
+    }
+
+    @PutMapping("/{id}")
+    public ResponseEntity<TransactionResponse> update(@AuthenticationPrincipal AppUser user,
+                                                      @PathVariable Long id,
+                                                      @Valid @RequestBody TransactionEditRequest request) {
+        TransactionResponse updated = transactionService.update(
+                user.getId(), id, request.operation(), request.amount(), request.date());
         return ResponseEntity.ok(updated);
     }
 

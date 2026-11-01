@@ -70,6 +70,7 @@ non-manual transactions.
 | GET | `/api/transactions` | — | `TransactionResponse[]` |
 | POST | `/api/transactions` | `TransactionRequest` | 201 `TransactionResponse` |
 | DELETE | `/api/transactions/{id}` | — | 204 (soft delete) |
+| PUT | `/api/transactions/{id}` | `{operation?, amount, date}` | 200 (edit; the fingerprint is **not** recomputed) |
 | POST | `/api/transactions/{id}/category` | `{categoryId}` | 200 (sets `category_manual`) |
 | PUT | `/api/transactions/{id}/comment` | `{comment}` | 200 (`null`/blank clears) |
 

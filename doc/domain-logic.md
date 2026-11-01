@@ -69,6 +69,10 @@ purposeNorm = purpose.trim().toLowerCase().replaceAll("\\s+", " ")
   statement (including tombstones), otherwise re-uploading the same file would
   skip everything as duplicates.
 - The single "Удалить" action in the transaction feed soft-deletes (tombstone).
+- The fingerprint is an **import identity**, not a content hash: editing a
+  transaction (operation/amount/date, in the feed or in the import preview of a
+  saved row) does **not** recompute it, so the same statement row can never be
+  imported twice.
 
 ### 1.5 Manual card management ("Карты" page)
 

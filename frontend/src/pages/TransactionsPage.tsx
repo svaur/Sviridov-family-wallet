@@ -73,6 +73,13 @@ export function TransactionsPage() {
   const [expandedId, setExpandedId] = useState<number | null>(null)
   const [rulePrefill, setRulePrefill] = useState<RulePrefill | null>(null)
 
+  // Inline editing of operation / amount / date, mirroring the import preview.
+  const [editId, setEditId] = useState<number | null>(null)
+  const [editOperation, setEditOperation] = useState('')
+  const [editAmount, setEditAmount] = useState('')
+  const [editDate, setEditDate] = useState('')
+  const [savingEdit, setSavingEdit] = useState(false)
+
   const iconById = useMemo(() => new Map(categories.map((c) => [c.id, c.icon])), [categories])
   const excludedCategoryIds = useMemo(
     () => new Set(categories.filter((c) => c.isExcluded).map((c) => c.id)),
@@ -186,6 +193,38 @@ export function TransactionsPage() {
       setExpandedId(id)
     }
     setRulePrefill(null)
+    setEditId(null)
+  }
+
+  function startEdit(t: Transaction) {
+    setEditId(t.id)
+    setEditOperation(t.operation ?? '')
+    setEditAmount(String(t.amount))
+    setEditDate(t.date)
+    setRulePrefill(null)
+  }
+
+  async function saveEdit(t: Transaction) {
+    const amount = Number(editAmount)
+    if (!editDate || !Number.isFinite(amount) || amount <= 0) {
+      setError('Укажите дату и сумму больше нуля')
+      return
+    }
+    setSavingEdit(true)
+    setError(null)
+    try {
+      const updated = await api.put<Transaction>(`/api/transactions/${t.id}`, {
+        operation: editOperation.trim() === '' ? null : editOperation.trim(),
+        amount,
+        date: editDate,
+      })
+      setTransactions((prev) => prev.map((x) => (x.id === t.id ? updated : x)))
+      setEditId(null)
+    } catch (e) {
+      setError(e instanceof HttpError ? e.message : 'Не удалось сохранить операцию')
+    } finally {
+      setSavingEdit(false)
+    }
   }
 
   async function deleteTx(t: Transaction) {
@@ -384,12 +423,63 @@ export function TransactionsPage() {
                         />
                         <button
                           className="btn-secondary btn-sm"
+                          onClick={() => (editId === t.id ? setEditId(null) : startEdit(t))}
+                        >
+                          {editId === t.id ? 'Скрыть правку' : 'Изменить'}
+                        </button>
+                        <button
+                          className="btn-secondary btn-sm"
                           onClick={() => (rulePrefill ? setRulePrefill(null) : createRuleFrom(t))}
                         >
                           {rulePrefill ? 'Скрыть форму' : 'Создать правило'}
                         </button>
                         <button className="btn-danger btn-sm" onClick={() => deleteTx(t)}>Удалить</button>
                       </div>
+                      {editId === t.id && (
+                        <div className="rule-quick-form">
+                          <div className="form-grid">
+                            <label className="field">
+                              <span>Операция</span>
+                              <input
+                                type="text"
+                                value={editOperation}
+                                maxLength={200}
+                                onChange={(e) => setEditOperation(e.target.value)}
+                              />
+                            </label>
+                            <label className="field">
+                              <span>Сумма</span>
+                              <input
+                                type="number"
+                                step="0.01"
+                                min="0.01"
+                                value={editAmount}
+                                onChange={(e) => setEditAmount(e.target.value)}
+                              />
+                            </label>
+                            <label className="field">
+                              <span>Дата</span>
+                              <input
+                                type="date"
+                                value={editDate}
+                                onChange={(e) => setEditDate(e.target.value)}
+                              />
+                            </label>
+                          </div>
+                          <div className="actions">
+                            <button className="btn-sm" onClick={() => saveEdit(t)} disabled={savingEdit}>
+                              {savingEdit ? 'Сохранение…' : 'Сохранить'}
+                            </button>
+                            <button
+                              type="button"
+                              className="btn-secondary btn-sm"
+                              onClick={() => setEditId(null)}
+                            >
+                              Отмена
+                            </button>
+                          </div>
+                        </div>
+                      )}
                       <div className="tx-actions">
                         <CommentField
                           id={t.id}

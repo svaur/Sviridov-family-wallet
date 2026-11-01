@@ -186,4 +186,35 @@ class TransactionServiceTest {
         service.updateComment(userId, txId, "   ");
         assertThat(tx.getComment()).isNull();
     }
+
+    @Test
+    void updateEditsOperationAmountAndDateButKeepsFingerprint() {
+        Long userId = 1L, txId = 5L;
+        Transaction tx = new Transaction(userId, 1L, 3, LocalDate.of(2026, 10, 1),
+                "Покупка", null, new BigDecimal("100.00"), "debit", "old-fingerprint");
+        when(transactionRepository.findByIdAndUserId(txId, userId)).thenReturn(Optional.of(tx));
+
+        TransactionResponse resp = service.update(userId, txId, "  Покупка исправленная  ",
+                new BigDecimal("250.50"), LocalDate.of(2026, 10, 2));
+
+        assertThat(resp.operation()).isEqualTo("Покупка исправленная");
+        assertThat(resp.amount()).isEqualByComparingTo("250.50");
+        assertThat(resp.date()).isEqualTo(LocalDate.of(2026, 10, 2));
+        // The fingerprint is an import identity, not a content hash: an edit
+        // must not let the same statement row be imported again.
+        assertThat(tx.getFingerprint()).isEqualTo("old-fingerprint");
+    }
+
+    @Test
+    void updateRejectsDeletedTransaction() {
+        Long userId = 1L, txId = 5L;
+        Transaction tx = new Transaction(userId, 1L, 3, LocalDate.of(2026, 10, 1),
+                "Покупка", null, new BigDecimal("100.00"), "debit", null);
+        tx.setDeletedAt(java.time.Instant.now());
+        when(transactionRepository.findByIdAndUserId(txId, userId)).thenReturn(Optional.of(tx));
+
+        assertThatThrownBy(() -> service.update(userId, txId, "Покупка",
+                new BigDecimal("100.00"), LocalDate.of(2026, 10, 1)))
+                .isInstanceOf(NotFoundException.class);
+    }
 }

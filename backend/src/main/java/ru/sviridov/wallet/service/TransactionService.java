@@ -14,7 +14,9 @@ import ru.sviridov.wallet.web.NotFoundException;
 import ru.sviridov.wallet.web.dto.TransactionRequest;
 import ru.sviridov.wallet.web.dto.TransactionResponse;
 
+import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -152,6 +154,33 @@ public class TransactionService {
         tx = transactionRepository.save(tx);
 
         String categoryName = categoryRepository.findById(categoryId).map(Category::getName).orElse(null);
+        return TransactionResponse.from(tx, categoryName);
+    }
+
+    /**
+     * Edits the user-visible fields of a transaction: operation, amount, date
+     * (the same three the import preview lets you correct).
+     *
+     * <p>The fingerprint is deliberately left untouched. It is an <em>import
+     * identity</em> — "this row of that statement was already taken" — not a
+     * content hash, so a hand correction must not reopen the door to importing
+     * the same statement row twice.</p>
+     */
+    @Transactional
+    public TransactionResponse update(Long userId, Long id, String operation, BigDecimal amount, LocalDate date) {
+        Transaction tx = transactionRepository.findByIdAndUserId(id, userId)
+                .orElseThrow(() -> new NotFoundException("Операция не найдена"));
+        if (tx.getDeletedAt() != null) {
+            throw new NotFoundException("Операция не найдена");
+        }
+        tx.setOperation(operation == null || operation.isBlank() ? null : operation.trim());
+        tx.setAmount(amount);
+        tx.setDate(date);
+        tx = transactionRepository.save(tx);
+
+        String categoryName = tx.getCategoryId() == null
+                ? null
+                : categoryRepository.findById(tx.getCategoryId()).map(Category::getName).orElse(null);
         return TransactionResponse.from(tx, categoryName);
     }
 

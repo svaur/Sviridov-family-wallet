@@ -67,6 +67,10 @@ that is accepted behaviour.
 - Session cookie, BCrypt password hashes, manual users.
 - Login rate limiting: in-memory, 5 attempts / 5 min per `username|clientIp`
   (`LoginRateLimiter`), 429 on block; `X-Forwarded-For` aware.
+- Deliberate per-process state, accepted for the single-instance deployment:
+  the auth session (in-memory HTTP session, so a restart logs everyone out)
+  and the rate-limit counters (reset on restart). Everything else — import
+  drafts included — lives in the database or in the browser.
 - CSRF disabled (same-site strict cookie + JSON-only API).
 - Secrets via env (`.env` → docker-compose), never committed.
 

@@ -46,7 +46,7 @@ Repositories are Spring Data JPA. Two queries are worth knowing:
 | `StatementService` | preview / categorize / confirm / list / delete (hard) |
 | `StatementGapService` | `detectGaps(cardId)` after confirm/delete |
 | `AnalyticsService` | KPI + monthly + category aggregation with excludes |
-| `LoginRateLimiter` | in-memory 5 attempts / 5 min per `username|ip` |
+| `LoginRateLimiter` | in-memory 5 attempts / 5 min per `username|ip`; expired keys are dropped and the map is swept past `MAX_KEYS` |
 
 ### `web/` — controllers + DTOs + errors
 

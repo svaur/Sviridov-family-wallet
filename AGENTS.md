@@ -26,6 +26,15 @@
   a manually assigned category. Manual (explicit) category assignment is protected
   from rules (implemented in Stage 5 via `transactions.category_manual`).
 
+## Documentation
+
+- Keep the `doc/` folder up to date. At the end of every task/approach, add or
+  update the relevant doc so that another AI (or developer) with **no prior
+  context** can understand the project quickly. The index is `doc/README.md`.
+- Write code comments for a human developer: explain **why** a non-obvious
+  decision was made (and what would break otherwise), not what the line does.
+  Prioritise `parser/`, `service/` and any geometric/threshold logic.
+
 ## Other
 
 - Do not use the term MVP when working on new parts and features of the project.

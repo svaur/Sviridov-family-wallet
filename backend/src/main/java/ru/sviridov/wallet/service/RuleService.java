@@ -20,6 +20,19 @@ import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 
+/**
+ * Categorization rules CRUD. A rule is a category + a flat object of optional
+ * conditions ({@code operation_contains}, {@code operation_regex},
+ * {@code purpose_contains}, {@code purpose_regex}, {@code min}, {@code max},
+ * {@code day_from}, {@code day_to}); the engine matches when ALL present
+ * conditions match (implicit AND, see {@link CategorizationEngine}).
+ *
+ * <p>Responsibility split: this class validates and canonicalises input
+ * (regexes are compiled once to reject bad patterns, {@code *_contains} values
+ * are normalised so case does not matter later), while matching itself lives in
+ * the engine. Every mutation triggers {@link TransactionService#reCategorizeAll}
+ * so the feed reflects rule changes immediately.</p>
+ */
 @Service
 public class RuleService {
 

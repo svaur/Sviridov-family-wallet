@@ -2,9 +2,10 @@ package ru.sviridov.wallet.web.dto;
 
 import ru.sviridov.wallet.domain.Category;
 
-public record CategoryResponse(Long id, Long parentId, String name, String icon) {
+public record CategoryResponse(Long id, Long parentId, String name, String icon, boolean isExcluded) {
 
     public static CategoryResponse from(Category category) {
-        return new CategoryResponse(category.getId(), category.getParentId(), category.getName(), category.getIcon());
+        return new CategoryResponse(category.getId(), category.getParentId(), category.getName(), category.getIcon(),
+                category.isExcluded());
     }
 }

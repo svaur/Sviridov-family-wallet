@@ -10,6 +10,22 @@ import ru.sviridov.wallet.web.NotFoundException;
 import java.util.List;
 import java.util.Set;
 
+/**
+ * Categories are strictly per-user. The only seeded category is the system
+ * "исключено" (see {@link #ensureExcludedCategory}), whose rows are dropped from
+ * analytics; everything else the user creates themselves. {@code parentId}
+ * exists for a future hierarchy; it is validated but not used for aggregation
+ * yet.
+ *
+ * <p>The icon is an emoji from a fixed allow-list. A closed list (rather than
+ * arbitrary text) keeps the chips/tables consistent and prevents the icon
+ * column from becoming a free-text field.</p>
+ *
+ * <p>Deleting a category relies on DB foreign keys: rules pointing at it are
+ * removed and transactions keep the row with {@code category_id = null}. We must
+ * {@code flush()} before re-categorising, otherwise the cascade has not run yet
+ * and transactions would still appear categorised.</p>
+ */
 @Service
 public class CategoryService {
 
@@ -20,7 +36,7 @@ public class CategoryService {
             "🚗", "⛽", "🚌", "✈️",
             "💊", "⚕️", "🏋️", "💇",
             "🧸", "🎬", "📚", "🎁", "🐾",
-            "💰", "🔄", "🧾", "📱", "📦");
+            "💰", "🔄", "🧾", "📱", "📦", "🚫");
 
     private final CategoryRepository categoryRepository;
     private final TransactionService transactionService;
@@ -30,8 +46,9 @@ public class CategoryService {
         this.transactionService = transactionService;
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public List<Category> list(Long userId) {
+        ensureExcludedCategory(userId);
         return categoryRepository.findByUserIdOrderByNameAsc(userId);
     }
 
@@ -56,11 +73,27 @@ public class CategoryService {
     public void delete(Long userId, Long id) {
         Category category = categoryRepository.findByIdAndUserId(id, userId)
                 .orElseThrow(() -> new NotFoundException("Категория не найдена"));
+        if (category.isExcluded()) {
+            throw new BadRequestException("Системная категория «исключено» не может быть удалена");
+        }
         categoryRepository.delete(category);
         // Execute the DELETE now so the DB-level cascade (rules removed,
         // transactions.category_id set to null) is visible to re-categorisation.
         categoryRepository.flush();
         transactionService.reCategorizeAll(userId);
+    }
+
+    /**
+     * The "исключено" category is a system default: assigning a transaction to
+     * it (by hand or by a rule) removes the transaction from the dashboard. It
+     * is created lazily on first list so new users (created after the migration)
+     * still get exactly one. There is never more than one per user because
+     * {@code is_excluded} is not settable through the public API.
+     */
+    private void ensureExcludedCategory(Long userId) {
+        if (!categoryRepository.existsByUserIdAndIsExcludedTrue(userId)) {
+            categoryRepository.save(new Category(userId, null, "исключено", "🚫", true));
+        }
     }
 
     private void validateParent(Long userId, Long parentId) {

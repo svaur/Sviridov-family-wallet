@@ -172,36 +172,6 @@ class TransactionServiceTest {
     }
 
     @Test
-    void markTransferMarksTransaction() {
-        Long userId = 1L, txId = 5L;
-        Transaction tx = new Transaction(userId, 1L, null, LocalDate.of(2026, 10, 1),
-                "добавлено вручную", "Перевод", new BigDecimal("5000.00"), "credit", null);
-        when(transactionRepository.findByIdAndUserId(txId, userId)).thenReturn(Optional.of(tx));
-        when(transactionRepository.findActiveByUserId(userId)).thenReturn(List.of());
-
-        TransactionResponse resp = service.markTransfer(userId, txId);
-
-        assertThat(resp.isTransfer()).isTrue();
-        assertThat(tx.isTransfer()).isTrue();
-    }
-
-    @Test
-    void markTransferAlsoMarksOppositePair() {
-        Long userId = 1L;
-        Transaction debit = new Transaction(userId, 1L, null, LocalDate.of(2026, 10, 1),
-                "добавлено вручную", "Перевод", new BigDecimal("5000.00"), "debit", null);
-        Transaction credit = new Transaction(userId, 2L, null, LocalDate.of(2026, 10, 1),
-                "добавлено вручную", "Перевод", new BigDecimal("5000.00"), "credit", null);
-        when(transactionRepository.findByIdAndUserId(1L, userId)).thenReturn(Optional.of(debit));
-        when(transactionRepository.findActiveByUserId(userId)).thenReturn(List.of(debit, credit));
-
-        service.markTransfer(userId, 1L);
-
-        assertThat(debit.isTransfer()).isTrue();
-        assertThat(credit.isTransfer()).isTrue();
-    }
-
-    @Test
     void updateCommentSetsAndClearsComment() {
         Long userId = 1L, txId = 5L;
         Transaction tx = new Transaction(userId, 1L, null, LocalDate.of(2026, 10, 1),

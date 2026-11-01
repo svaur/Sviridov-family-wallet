@@ -10,6 +10,7 @@ interface Category {
   parentId: number | null
   name: string
   icon: string
+  isExcluded?: boolean
 }
 
 interface Rule {
@@ -305,17 +306,19 @@ export function RulesPage() {
           {categories.map((c) => (
             <span key={c.id} className="chip" onClick={() => startCatEdit(c)} title="Нажмите, чтобы изменить">
               <span className="chip-icon">{c.icon}</span>{c.name}
-              <button
-                type="button"
-                className="chip-x"
-                title="Удалить"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  deleteCategory(c)
-                }}
-              >
-                ×
-              </button>
+              {!c.isExcluded && (
+                <button
+                  type="button"
+                  className="chip-x"
+                  title="Удалить"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    deleteCategory(c)
+                  }}
+                >
+                  ×
+                </button>
+              )}
             </span>
           ))}
           {categories.length === 0 && <span className="muted">Категорий пока нет — создайте первую</span>}

@@ -26,6 +26,7 @@ interface Category {
   id: number
   name: string
   icon: string
+  isExcluded?: boolean
 }
 
 interface Card {
@@ -73,6 +74,10 @@ export function TransactionsPage() {
   const [rulePrefill, setRulePrefill] = useState<RulePrefill | null>(null)
 
   const iconById = useMemo(() => new Map(categories.map((c) => [c.id, c.icon])), [categories])
+  const excludedCategoryIds = useMemo(
+    () => new Set(categories.filter((c) => c.isExcluded).map((c) => c.id)),
+    [categories],
+  )
 
   async function load() {
     setLoading(true)
@@ -211,16 +216,6 @@ export function TransactionsPage() {
       await load()
     } catch (e) {
       setError(e instanceof HttpError ? e.message : 'Не удалось назначить категорию')
-    }
-  }
-
-  async function markTransfer(id: number) {
-    try {
-      await api.post<Transaction>(`/api/transactions/${id}/transfer`)
-      setExpandedId(null)
-      await load()
-    } catch (e) {
-      setError(e instanceof HttpError ? e.message : 'Не удалось отметить перевод')
     }
   }
 
@@ -368,11 +363,10 @@ export function TransactionsPage() {
                     )}
                   </td>
                   <td>
-                    <span className={`badge ${badgeClass(t.source)}`}>{sourceLabel(t)}</span>{' '}
-                    {t.isTransfer && <span className="badge badge-transfer">перевод</span>}
+                    <span className={`badge ${badgeClass(t.source)}`}>{sourceLabel(t)}</span>
                   </td>
                   <td className={t.type === 'debit' ? 'amount-debit' : 'amount-credit'}>
-                    {t.isTransfer ? (
+                    {excludedCategoryIds.has(t.categoryId ?? 0) ? (
                       <span className="muted">исключено</span>
                     ) : (
                       <>{t.type === 'debit' ? '− ' : '+ '}{fmtMoney(t.amount)}</>
@@ -394,11 +388,6 @@ export function TransactionsPage() {
                         >
                           {rulePrefill ? 'Скрыть форму' : 'Создать правило'}
                         </button>
-                        {!t.isTransfer && (
-                          <button className="btn-secondary btn-sm" onClick={() => markTransfer(t.id)}>
-                            Это перевод
-                          </button>
-                        )}
                         <button className="btn-danger btn-sm" onClick={() => deleteTx(t)}>Удалить</button>
                       </div>
                       <div className="tx-actions">

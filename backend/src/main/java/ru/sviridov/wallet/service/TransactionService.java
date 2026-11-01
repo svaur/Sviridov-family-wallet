@@ -20,9 +20,28 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
+/**
+ * Transaction feed operations: listing, manual entry, soft delete, manual
+ * category assignment, comments and bulk re-categorization.
+ *
+ * <p>Two invariants live here and are easy to break:</p>
+ * <ul>
+ *   <li>Deleting from the feed is a SOFT delete (tombstone) — see
+ *       {@link #delete}. The fingerprint stays in the DB, so re-importing the
+ *       same statement does not resurrect a transaction the user removed.</li>
+ *   <li>A manually assigned category sets {@code category_manual = true}, and
+ *       {@link #reCategorizeAll} skips those rows. Auto-apply must never
+ *       overwrite an explicit human choice (see AGENTS.md → Categorization).</li>
+ * </ul>
+ */
 @Service
 public class TransactionService {
 
+    /**
+     * Manual entries have no bank "operation" text; we write a constant instead
+     * of leaving the column empty so the feed is not visually ambiguous, and so
+     * the value is recognisable in the UI.
+     */
     private static final String MANUAL_OPERATION = "добавлено вручную";
 
     private final TransactionRepository transactionRepository;
@@ -133,47 +152,6 @@ public class TransactionService {
         tx = transactionRepository.save(tx);
 
         String categoryName = categoryRepository.findById(categoryId).map(Category::getName).orElse(null);
-        return TransactionResponse.from(tx, categoryName);
-    }
-
-    /**
-     * Marks a transaction as an internal transfer and, heuristically, also
-     * marks any opposite-side transaction with the same amount and date (the
-     * matching debit/credit pair), so analytics excludes both.
-     */
-    @Transactional
-    public TransactionResponse markTransfer(Long userId, Long id) {
-        Transaction tx = transactionRepository.findByIdAndUserId(id, userId)
-                .orElseThrow(() -> new NotFoundException("Операция не найдена"));
-        if (tx.getDeletedAt() != null) {
-            throw new NotFoundException("Операция не найдена");
-        }
-        tx.setIsTransfer(true);
-        tx = transactionRepository.save(tx);
-
-        for (Transaction other : transactionRepository.findActiveByUserId(userId)) {
-            if (other == tx || (other.getId() != null && other.getId().equals(tx.getId()))) {
-                continue;
-            }
-            if (other.isTransfer()) {
-                continue;
-            }
-            if (!other.getDate().equals(tx.getDate())) {
-                continue;
-            }
-            if (other.getAmount().compareTo(tx.getAmount()) != 0) {
-                continue;
-            }
-            if (other.getType().equals(tx.getType())) {
-                continue;
-            }
-            other.setIsTransfer(true);
-            transactionRepository.save(other);
-        }
-
-        String categoryName = tx.getCategoryId() == null
-                ? null
-                : categoryRepository.findById(tx.getCategoryId()).map(Category::getName).orElse(null);
         return TransactionResponse.from(tx, categoryName);
     }
 

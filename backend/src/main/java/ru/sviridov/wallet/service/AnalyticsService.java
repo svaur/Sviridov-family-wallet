@@ -18,6 +18,25 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+/**
+ * Server-side aggregation behind the dashboard. All filtering happens here so
+ * the frontend never has to re-implement the "what counts" rules:
+ * <ul>
+ *   <li>transfers between the user's own cards are excluded
+ *       ({@code is_transfer});</li>
+ *   <li>explicitly excluded rows are excluded ({@code is_excluded});</li>
+ *   <li>rows assigned to the system "исключено" category are excluded
+ *       (category {@code is_excluded = true});</li>
+ *   <li>categories (and the uncategorized bucket) can be hidden via
+ *       {@code exclude=...} from the dashboard checkboxes;</li>
+ *   <li>income = {@code credit}, expense = {@code debit}; balance is their
+ *       difference.</li>
+ * </ul>
+ *
+ * <p>Monthly points are zero-filled for every month in the requested range — the
+ * chart must not "skip" a month with no data. The category breakdown is
+ * expense-only (income by category is not interesting for the dashboard).</p>
+ */
 @Service
 public class AnalyticsService {
 
@@ -34,16 +53,25 @@ public class AnalyticsService {
 
     @Transactional(readOnly = true)
     public AnalyticsResponse analytics(Long userId, LocalDate from, LocalDate to, Set<Long> excludeCategoryIds) {
+        List<Category> categories = categoryRepository.findByUserIdOrderByNameAsc(userId);
+        // The system "исключено" category (is_excluded=true) always drops its rows
+        // from the dashboard, independent of the per-view exclude checkboxes.
+        Set<Long> excludedCategoryIds = categories.stream()
+                .filter(Category::isExcluded)
+                .map(Category::getId)
+                .collect(Collectors.toSet());
+        Map<Long, String> categoryNames = categories.stream()
+                .collect(Collectors.toMap(Category::getId, Category::getName));
+
         List<Transaction> txs = transactionRepository.findActiveByUserId(userId).stream()
                 .filter(t -> !t.getDate().isBefore(from) && !t.getDate().isAfter(to))
                 .filter(t -> !t.isTransfer() && !t.isExcluded())
+                .filter(t -> t.getCategoryId() == null || !excludedCategoryIds.contains(t.getCategoryId()))
                 .filter(t -> !isExcluded(t.getCategoryId(), excludeCategoryIds))
                 .toList();
 
         BigDecimal income = sum(txs, "credit");
         BigDecimal expense = sum(txs, "debit");
-        Map<Long, String> categoryNames = categoryRepository.findByUserIdOrderByNameAsc(userId).stream()
-                .collect(Collectors.toMap(Category::getId, Category::getName));
 
         return new AnalyticsResponse(
                 from, to,

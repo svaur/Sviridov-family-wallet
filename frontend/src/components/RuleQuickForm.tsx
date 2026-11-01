@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { api, HttpError } from '../api'
-import { buildRuleParams, dayOfMonth, ruleMatchesTemplate } from '../ruleHelpers'
+import { buildRuleParams, ruleMatchesTemplate } from '../ruleHelpers'
 import { CategorySelect } from './CategorySelect'
 
 interface Category {
@@ -27,9 +27,10 @@ interface RuleQuickFormProps {
 
 /**
  * Compact inline "create rule from example" form shown under a transaction row.
- * Pre-fills the counterparty, operation, amount and day-of-month from the
- * transaction; the user picks the category and confirms. Priority defaults to
- * 100, name is left empty.
+ * Pre-fills only the counterparty (назначение платежа) and operation; the
+ * amount and day-of-month are left empty on purpose — they are too specific to
+ * guess from a single example. The user picks the category and confirms.
+ * Priority defaults to 100, name is left empty.
  *
  * Before saving, it verifies the rule would match the template transaction. If
  * it would not, an inline warning is shown (instead of the browser's native
@@ -40,16 +41,10 @@ export function RuleQuickForm({ categories, prefill, onClose, onCreated, onCateg
   const [categoryId, setCategoryId] = useState(prefill.categoryId != null ? String(prefill.categoryId) : '')
   const [purpose, setPurpose] = useState(prefill.purpose ?? '')
   const [operation, setOperation] = useState(prefill.operation ?? '')
-  const [min, setMin] = useState(prefill.amount != null ? String(prefill.amount) : '')
-  const [max, setMax] = useState(prefill.amount != null ? String(prefill.amount) : '')
-  const [dayFrom, setDayFrom] = useState(() => {
-    const d = dayOfMonth(prefill.date)
-    return d != null ? String(d) : ''
-  })
-  const [dayTo, setDayTo] = useState(() => {
-    const d = dayOfMonth(prefill.date)
-    return d != null ? String(d) : ''
-  })
+  const [min, setMin] = useState('')
+  const [max, setMax] = useState('')
+  const [dayFrom, setDayFrom] = useState('')
+  const [dayTo, setDayTo] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [warnMismatch, setWarnMismatch] = useState(false)

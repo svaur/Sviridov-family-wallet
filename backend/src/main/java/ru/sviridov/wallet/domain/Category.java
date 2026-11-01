@@ -32,22 +32,30 @@ public class Category {
     @Column(nullable = false, length = 8)
     private String icon;
 
+    @Column(name = "is_excluded", nullable = false)
+    private boolean isExcluded;
+
     protected Category() {
     }
 
     public Category(Long userId, String name) {
-        this(userId, null, name, "📦");
+        this(userId, null, name, "📦", false);
     }
 
     public Category(Long userId, Long parentId, String name) {
-        this(userId, parentId, name, "📦");
+        this(userId, parentId, name, "📦", false);
     }
 
     public Category(Long userId, Long parentId, String name, String icon) {
+        this(userId, parentId, name, icon, false);
+    }
+
+    public Category(Long userId, Long parentId, String name, String icon, boolean isExcluded) {
         this.userId = userId;
         this.parentId = parentId;
         this.name = name;
         this.icon = icon;
+        this.isExcluded = isExcluded;
     }
 
     public Long getId() {
@@ -80,5 +88,13 @@ public class Category {
 
     public void setIcon(String icon) {
         this.icon = icon;
+    }
+
+    public boolean isExcluded() {
+        return isExcluded;
+    }
+
+    public void setExcluded(boolean excluded) {
+        isExcluded = excluded;
     }
 }

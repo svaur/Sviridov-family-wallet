@@ -57,13 +57,6 @@ public class TransactionController {
         return ResponseEntity.ok(updated);
     }
 
-    @PostMapping("/{id}/transfer")
-    public ResponseEntity<TransactionResponse> markTransfer(@AuthenticationPrincipal AppUser user,
-                                                            @PathVariable Long id) {
-        TransactionResponse updated = transactionService.markTransfer(user.getId(), id);
-        return ResponseEntity.ok(updated);
-    }
-
     @PutMapping("/{id}/comment")
     public ResponseEntity<TransactionResponse> updateComment(@AuthenticationPrincipal AppUser user,
                                                              @PathVariable Long id,

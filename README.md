@@ -58,7 +58,7 @@ docker-compose.yml  postgres + backend + frontend (nginx)
   INSERT INTO users (username, password_hash)
   VALUES ('family', '$2a$10$<bcrypt-hash>');  -- generate with htpasswd -bnBC 10 "" <password> | tr -d ':\n'
   ```
-- Endpoints: `POST /api/auth/login`, `GET /api/auth/me`, `POST /api/auth/logout`.
+- Endpoints: `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/me`, `PUT /api/me/profile`, `PUT /api/me/password`.
 
 ## API
 

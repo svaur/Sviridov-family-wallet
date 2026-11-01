@@ -49,6 +49,7 @@ class WalletFlowIT {
     static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine");
 
     private static final String PASSWORD = "it-secret-1";
+    private static final String NEW_PASSWORD = "it-secret-2-changed";
 
     @Autowired
     private MockMvc mvc;
@@ -90,13 +91,44 @@ class WalletFlowIT {
 
         MvcResult ok = anon.login(username, PASSWORD);
         assertThat(ok.getResponse().getStatus()).isEqualTo(200);
-        assertThat(anon.get("/api/auth/me").get("username").asText()).isEqualTo(username);
+        assertThat(anon.get("/api/me").get("username").asText()).isEqualTo(username);
         assertThat(anon.get("/api/transactions").isArray()).isTrue();
 
         assertThat(anon.postRaw("/api/auth/logout", Map.of()).getResponse().getStatus()).isEqualTo(200);
         assertThat(anon.session().isInvalid()).isTrue();
         assertThat(Api.anonymous(mvc, json).getRaw("/api/transactions").getResponse().getStatus())
                 .isEqualTo(401);
+    }
+
+    @Test
+    void profileAndPasswordChange() throws Exception {
+        JsonNode profile = api.put("/api/me/profile", Map.of("firstName", " Иван ", "lastName", "Свиридов"));
+        assertThat(profile.get("firstName").asText()).isEqualTo("Иван");
+        assertThat(profile.get("lastName").asText()).isEqualTo("Свиридов");
+        assertThat(api.get("/api/me").get("firstName").asText()).isEqualTo("Иван");
+
+        MvcResult shortPassword = api.putRaw("/api/me/password",
+                Map.of("currentPassword", PASSWORD, "newPassword", "short"));
+        assertThat(shortPassword.getResponse().getStatus()).isEqualTo(400);
+
+        MvcResult wrongCurrent = api.putRaw("/api/me/password",
+                Map.of("currentPassword", "not-my-password", "newPassword", "brand-new-1"));
+        assertThat(wrongCurrent.getResponse().getStatus()).isEqualTo(400);
+        assertThat(json.readTree(wrongCurrent.getResponse().getContentAsString(StandardCharsets.UTF_8))
+                .get("message").asText()).isEqualTo("Неверный текущий пароль");
+
+        MvcResult changed = api.putRaw("/api/me/password",
+                Map.of("currentPassword", PASSWORD, "newPassword", NEW_PASSWORD));
+        assertThat(changed.getResponse().getStatus()).isEqualTo(204);
+
+        // Every session is stale now, this one included (the epoch moved).
+        assertThat(api.getRaw("/api/me").getResponse().getStatus()).isEqualTo(401);
+
+        assertThat(Api.anonymous(mvc, json).login(username, PASSWORD).getResponse().getStatus())
+                .isEqualTo(401);
+        Api fresh = Api.anonymous(mvc, json);
+        assertThat(fresh.login(username, NEW_PASSWORD).getResponse().getStatus()).isEqualTo(200);
+        assertThat(fresh.get("/api/me").get("firstName").asText()).isEqualTo("Иван");
     }
 
     @Test

@@ -7,6 +7,7 @@ import { CardsPage } from './pages/CardsPage'
 import { ImportPage } from './pages/ImportPage'
 import { LoginPage } from './pages/LoginPage'
 import { RulesPage } from './pages/RulesPage'
+import { SettingsPage } from './pages/SettingsPage'
 import { StatementsPage } from './pages/StatementsPage'
 import { TransactionsPage } from './pages/TransactionsPage'
 
@@ -30,6 +31,7 @@ export default function App() {
           <Route path="import" element={<ImportPage />} />
           <Route path="rules" element={<RulesPage />} />
           <Route path="transactions" element={<TransactionsPage />} />
+          <Route path="settings" element={<SettingsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />

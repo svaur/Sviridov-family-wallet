@@ -9,13 +9,13 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
-import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import ru.sviridov.wallet.security.AppUser;
 import ru.sviridov.wallet.service.LoginRateLimiter;
+import ru.sviridov.wallet.service.UserService;
 import ru.sviridov.wallet.web.dto.LoginRequest;
 import ru.sviridov.wallet.web.dto.UserResponse;
 
@@ -25,10 +25,13 @@ public class AuthController {
 
     private final AuthenticationManager authenticationManager;
     private final LoginRateLimiter rateLimiter;
+    private final UserService userService;
 
-    public AuthController(AuthenticationManager authenticationManager, LoginRateLimiter rateLimiter) {
+    public AuthController(AuthenticationManager authenticationManager, LoginRateLimiter rateLimiter,
+                          UserService userService) {
         this.authenticationManager = authenticationManager;
         this.rateLimiter = rateLimiter;
+        this.userService = userService;
     }
 
     @PostMapping("/login")
@@ -45,18 +48,14 @@ public class AuthController {
             HttpSession session = httpRequest.getSession(true);
             session.setAttribute(HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY,
                     SecurityContextHolder.getContext());
+            // The principal carries no display data (it is snapshotted into the
+            // session), so the current name is read once here for the response.
             AppUser user = (AppUser) authentication.getPrincipal();
-            return new UserResponse(user.getId(), user.getUsername());
+            return userService.get(user.getId());
         } catch (BadCredentialsException e) {
             rateLimiter.recordFailure(key);
             throw e;
         }
-    }
-
-    @GetMapping("/me")
-    public UserResponse me(Authentication authentication) {
-        AppUser user = (AppUser) authentication.getPrincipal();
-        return new UserResponse(user.getId(), user.getUsername());
     }
 
     @PostMapping("/logout")

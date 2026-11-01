@@ -117,6 +117,8 @@ body {
 }
 
 .side-bottom .avatar {
+  flex: none;
+  text-decoration: none;
   width: 34px;
   height: 34px;
   border-radius: 50%;
@@ -158,6 +160,11 @@ body {
 
 .page {
   max-width: 1100px;
+}
+
+/* Settings is two short forms: a full-width 1100px card looks empty. */
+.settings-page {
+  max-width: 760px;
 }
 
 .page-centered {
@@ -463,6 +470,17 @@ input[type='checkbox'] {
 
 .success {
   color: #047857;
+}
+
+/* Neutral info line (e.g. "пароль изменён, войдите снова" on the login form). */
+.notice {
+  background: #eef2ff;
+  border: 1px solid #c7d2fe;
+  color: #3730a3;
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 13px;
+  margin-bottom: 12px;
 }
 
 .muted {

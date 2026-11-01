@@ -46,6 +46,7 @@ through HTTP:
 | Rule validation | `RuleServiceTest` | unknown keys, empty params, regex compile, `min`/`max`, `day_from`/`day_to`, canonicalisation, re-categorisation trigger |
 | Category validation | `CategoryServiceTest` | emoji allow-list, lazy "исключено" seeding, system category protection, flush-before-re-categorise |
 | Transactions | `TransactionServiceTest` | dedup, fingerprint stability, soft-delete tombstone, edit |
+| Profile & password | `UserServiceTest` | name trimming/blank → null, wrong current password + rate-limit failure, same-password rejection, hash replacement and epoch bump, blocked after 5 failures |
 | Statements | `StatementServiceTest` | import counts, duplicate skipping, partial status |
 | Cards | `CardServiceTest` | number → `last4`, duplicate numbers, rename, delete |
 | Analytics | `AnalyticsServiceTest` | totals, exclusions, monthly buckets |
@@ -63,7 +64,7 @@ screenshot OCR via the CLI); the Docker image always has it.
 that runs the real security filter chain, the real controllers/JSON contract,
 the real repositories (all JPQL/derived queries) and the real Flyway schema.
 
-Six client paths:
+Seven client paths:
 
 | Test | Path it walks |
 |---|---|
@@ -73,6 +74,7 @@ Six client paths:
 | `duplicatesAreSkippedAndDeletingAStatementRemovesItsData` | re-import skips 12/12, hard delete of a statement returns its rows, the same file imports again |
 | `analyticsTotalsAndExclusions` | totals, `exclude=0` sentinel, «исключено» category drops rows |
 | `manualTransactionLifecycle` | manual create, edit, comment, invalid edit 400, delete |
+| `profileAndPasswordChange` | save name → `/api/me`; short/new-password validation; wrong current password 400; change 204 → own session 401; old password rejected, new one logs in |
 
 `it/Api.java` is a small package-private helper around MockMvc (session cookie,
 JSON verbs, multipart upload) so each test reads as a sequence of API calls.

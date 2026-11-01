@@ -28,9 +28,15 @@ applied migration (Flyway validates checksums).
 ## Tables
 
 ### users
-`id`, `username` (unique), `password_hash` (BCrypt), `created_at`.
+`id`, `username` (unique), `password_hash` (BCrypt), `first_name`, `last_name`,
+`password_changed_at`, `created_at`.
 No self-registration — users are created by `AdminUserBootstrap`
 (`BOOTSTRAP_USERNAME` / `BOOTSTRAP_PASSWORD`) or manually in SQL.
+
+`first_name`/`last_name` are optional display data used by the sidebar (the login
+itself is immutable). `password_changed_at` is an **epoch**, not an audit field:
+it is snapshotted into the session at login and compared on every request, so a
+password change invalidates all sessions without a server-side session registry.
 
 ### cards
 `id`, `user_id`, `display_name`, `card_number VARCHAR(20)`, `last4`,

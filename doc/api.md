@@ -9,15 +9,33 @@ always the unified `ApiError` shape:
   "fieldErrors": [ { "field": "username", "message": "Логин обязателен" } ] }
 ```
 
-## Auth (`/api/auth`) — public except `/me`, `/logout`
+## Auth (`/api/auth`) — public except `/logout`
 
 | Method | Path | Body | Response |
 |---|---|---|---|
 | POST | `/api/auth/login` | `{username, password}` | `UserResponse`; 401 on bad creds; 429 when rate-limited |
-| GET | `/api/auth/me` | — | `UserResponse` |
 | POST | `/api/auth/logout` | — | 204 |
 
 Rate limit: 5 failures / 5 min per `username|ip` → 429 "Слишком много попыток".
+
+## Current user (`/api/me`)
+
+| Method | Path | Body | Response |
+|---|---|---|---|
+| GET | `/api/me` | — | `UserResponse` (`id, username, firstName, lastName`) |
+| PUT | `/api/me/profile` | `{firstName?, lastName?}` | `UserResponse` |
+| PUT | `/api/me/password` | `{currentPassword, newPassword}` | 204 |
+
+`firstName`/`lastName` are display data only (the login never changes). They are
+trimmed, inner spaces are collapsed and a blank value is stored as `null`, so
+the sidebar can fall back to the login with a single check.
+
+`newPassword` is 8–72 characters. The current password is verified first — a
+wrong one returns **400** "Неверный текущий пароль" and counts towards a
+5-failures/5-min limit per user (429); the endpoint is never an oracle for the
+new-password rules. Changing the password bumps `users.password_changed_at`, so
+**every** session, including the one that made the call, gets
+`401 "Сессия завершена после смены пароля. Войдите снова."` on its next request.
 
 ## Cards (`/api/cards`)
 

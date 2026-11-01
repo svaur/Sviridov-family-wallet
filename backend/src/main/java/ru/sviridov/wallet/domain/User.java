@@ -10,9 +10,15 @@ import jakarta.persistence.Table;
 import java.time.Instant;
 
 /**
- * Application user. Contains only credentials: {@code username} (login) and
- * {@code passwordHash} (BCrypt), plus the {@code createdAt} timestamp. Users
- * are created manually (bootstrap env var or SQL); there is no self-registration.
+ * Application user. Credentials ({@code username} login + BCrypt
+ * {@code passwordHash}) plus an optional human-readable name that the sidebar
+ * shows instead of the login. Users are created manually (bootstrap env var or
+ * SQL); there is no self-registration.
+ *
+ * <p>{@code passwordChangedAt} is an epoch, not just an audit field: it is
+ * snapshotted into the authentication principal at login and compared on every
+ * request, so changing the password signs out the other devices without any
+ * server-side session registry.</p>
  */
 @Entity
 @Table(name = "users")
@@ -28,6 +34,15 @@ public class User {
     @Column(name = "password_hash", nullable = false, length = 100)
     private String passwordHash;
 
+    @Column(name = "first_name", length = 64)
+    private String firstName;
+
+    @Column(name = "last_name", length = 64)
+    private String lastName;
+
+    @Column(name = "password_changed_at", nullable = false)
+    private Instant passwordChangedAt;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
@@ -38,6 +53,7 @@ public class User {
         this.username = username;
         this.passwordHash = passwordHash;
         this.createdAt = Instant.now();
+        this.passwordChangedAt = this.createdAt;
     }
 
     public Long getId() {
@@ -52,7 +68,31 @@ public class User {
         return passwordHash;
     }
 
+    public String getFirstName() {
+        return firstName;
+    }
+
+    public String getLastName() {
+        return lastName;
+    }
+
+    public Instant getPasswordChangedAt() {
+        return passwordChangedAt;
+    }
+
     public Instant getCreatedAt() {
         return createdAt;
+    }
+
+    /** Blank names arrive as {@code null}; trimming is the service's job. */
+    public void setName(String firstName, String lastName) {
+        this.firstName = firstName;
+        this.lastName = lastName;
+    }
+
+    /** Callers encode the password; bumping the epoch is exactly the point. */
+    public void changePassword(String newPasswordHash) {
+        this.passwordHash = newPasswordHash;
+        this.passwordChangedAt = Instant.now();
     }
 }

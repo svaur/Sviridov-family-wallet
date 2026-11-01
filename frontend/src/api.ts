@@ -41,6 +41,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   if (!res.ok) {
+    // A 401 outside the login form means the session is gone (expired, server
+    // restart, password changed elsewhere). AuthProvider listens for this and
+    // clears the user, which makes RequireAuth show the login page.
+    if (res.status === 401 && !path.startsWith('/api/auth/login')) {
+      window.dispatchEvent(new Event('wallet:unauthorized'))
+    }
     const err = body as ApiErrorBody | null
     throw new HttpError(res.status, err?.message ?? `Ошибка ${res.status}`, err?.fieldErrors ?? [])
   }

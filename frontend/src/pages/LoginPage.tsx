@@ -11,6 +11,7 @@ export function LoginPage() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const notice = (location.state as { notice?: string } | null)?.notice
 
   if (user) return <Navigate to="/" replace />
 
@@ -38,6 +39,7 @@ export function LoginPage() {
         </div>
         <h1>Вход</h1>
         <p className="login-sub">Личный и семейный учёт финансов по выпискам банка.</p>
+        {notice && <div className="notice">{notice}</div>}
         <label className="field">
           <span>Логин</span>
           <input

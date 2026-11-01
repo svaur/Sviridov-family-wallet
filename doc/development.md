@@ -43,14 +43,14 @@ pnpm dev                     # Vite on :5173, proxies /api and /actuator to :808
 ## Tests
 
 ```bash
-cd backend && mvn test        # 120 unit tests (Docker-free; 1 OCR test skipped without local tesseract)
+cd backend && mvn test        # 131 unit tests (Docker-free; 1 OCR test skipped without local tesseract)
 cd backend && mvn verify      # + 6 integration tests on Testcontainers PostgreSQL (needs Docker)
 cd frontend && pnpm build     # tsc -b + vite build
 ```
 
 Unit tests do not start a Spring context; they construct services manually with
 Mockito mocks. `WalletFlowIT` boots the real app against a throwaway
-`postgres:16-alpine` and walks six client paths through MockMvc. Details, the
+`postgres:16-alpine` and walks seven client paths through MockMvc. Details, the
 Docker-socket/API-version requirements and how to add a path: [testing.md](testing.md).
 
 Parser tests use sanitized fixtures in `backend/src/test/resources/`

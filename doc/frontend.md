@@ -16,17 +16,24 @@ production.
   /cards                        CardsPage
   /import                       ImportPage (?kind=screenshot for OCR mode)
   /rules                        RulesPage
+  /settings                     SettingsPage
   *                             → Navigate to "/"
 ```
 
 `RequireAuth` shows "Загрузка…" while `AuthContext` restores the session
-(`GET /api/auth/me`) and redirects to `/login` with `state.from` when anonymous.
+(`GET /api/me`) and redirects to `/login` with `state.from` when anonymous. Any
+`401` from `api.ts` dispatches `wallet:unauthorized`; `AuthProvider` clears the
+user on it, so a session killed elsewhere (password change, server restart)
+lands on the login page instead of leaving error banners on every screen.
 
 ## Shell
 
 `components/Layout.tsx` — dark sidebar `#151238` (240px) with:
 Дашборд `/`, Операции `/transactions`, Выписки `/statements`, Карты `/cards`,
-Правила `/rules`; at the bottom an avatar (first letter of the username) + logout.
+Правила `/rules`, Настройки `/settings`; at the bottom an avatar (initial of
+`firstName`, else of the login — clicking it opens the settings) and
+`displayName(user)`: "Иван Свиридов", falling back to the login when no name is
+set. The name is shown **only** here — the dashboard has no greeting.
 
 ## Pages
 
@@ -35,6 +42,7 @@ production.
 | `DashboardPage` | period picker "с"/"по" (two `<input type="date">`, default trailing 30 days; drives every widget); 4 stat cards (Доход/Расход/Баланс/Карты) with trends vs the previous period of the same length; Recharts donut PieChart of expense categories (top 5 + "Прочее"); top-categories bars; "Самые крупные покупки" (debits, non-excluded, in period, sorted desc, top 5) with inline comment editing; category-exclude checkboxes (querystring `?exclude=`) |
 | `TransactionsPage` | feed with client-side filters (search/type/category/source); category pill with icon; "исключено" (muted) when the category is the system excluded one; expanded row: CategoryPicker, inline edit of operation/amount/date, rule form, delete; "+ Добавить операцию" manual form (hidden behind a button) |
 | `StatementsPage` | "+ Загрузить выписку" / "+ Загрузить скрин ленты"; upload-history table with inline card rename, status badges, delete statement (hard delete); "Пропуски в выписках" table |
+| `SettingsPage` | two cards: «Профиль» (Имя/Фамилия, save disabled until changed, inline "Сохранено", shows the resulting `displayName`) and «Безопасность» (current/new/repeat password; client checks length ≥ 8, mismatch and "same as current"; on success logs out and lands on `/login` with "Пароль изменён. Войдите снова.") |
 | `CardsPage` | card CRUD: list (номер/название/валюта/дата), "+ Добавить карту", inline edit form (number + name), delete with a confirm that warns about the cascade |
 | `ImportPage` | 3-step stateless wizard: choose file → preview/edit rows → confirm. Holds rows in React state; edits/deletes/adds are local; "Применить правила" calls `POST /api/statements/categorize`; import calls `POST /api/statements/confirm`. Screenshot mode (`?kind=screenshot`) shows a red warning banner and accepts images. If the card number was not recognized, step 2 shows a card picker (existing cards from `GET /api/cards` + "＋ Новая карта" manual entry) and "Далее" is disabled until a card is chosen |
 | `RulesPage` | categories as chips (click to edit, × to delete, icon picker); rules table; "Создать правило" form with flat conditions (Назначение платежа / Операция with regex auto-detect, sum range, day range); "Применить правила" button (`POST /api/rules/apply`) |

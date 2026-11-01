@@ -71,6 +71,12 @@ that is accepted behaviour.
   the auth session (in-memory HTTP session, so a restart logs everyone out)
   and the rate-limit counters (reset on restart). Everything else — import
   drafts included — lives in the database or in the browser.
+- Password change signs out **every** device: `users.password_changed_at` is
+  snapshotted into the session principal at login, and `PasswordEpochFilter`
+  (runs after Spring Security, one primary-key read per authenticated request)
+  rejects a stale epoch with 401. Stateless — no session registry; the cost is
+  the extra lookup, which is negligible for 1–3 users. Login and logout are
+  exempt so a browser holding the stale cookie can authenticate again.
 - CSRF disabled (same-site strict cookie + JSON-only API).
 - Secrets via env (`.env` → docker-compose), never committed.
 

@@ -1,5 +1,5 @@
-import { NavLink, Outlet } from 'react-router-dom'
-import { useAuth } from '../auth/AuthContext'
+import { Link, NavLink, Outlet } from 'react-router-dom'
+import { displayName, initialOf, useAuth } from '../auth/AuthContext'
 
 function navClass({ isActive }: { isActive: boolean }) {
   return 'side-item' + (isActive ? ' active' : '')
@@ -7,7 +7,6 @@ function navClass({ isActive }: { isActive: boolean }) {
 
 export function Layout() {
   const { user, logout } = useAuth()
-  const initial = user?.username?.[0]?.toUpperCase() ?? '?'
 
   return (
     <div className="app-shell">
@@ -36,10 +35,17 @@ export function Layout() {
           <span className="ico">◎</span>Правила
         </NavLink>
 
+        <div className="side-group">Аккаунт</div>
+        <NavLink className={navClass} to="/settings">
+          <span className="ico">⚙</span>Настройки
+        </NavLink>
+
         <div className="side-bottom">
-          <div className="avatar">{initial}</div>
+          <Link className="avatar" to="/settings" title="Настройки">
+            {initialOf(user)}
+          </Link>
           <div>
-            <div className="nm">{user?.username ?? '—'}</div>
+            <div className="nm">{displayName(user)}</div>
             <button type="button" className="logout" onClick={() => logout()}>
               Выйти
             </button>

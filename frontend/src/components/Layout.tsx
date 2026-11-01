@@ -29,6 +29,9 @@ export function Layout() {
         <NavLink className={navClass} to="/statements">
           <span className="ico">▤</span>Выписки
         </NavLink>
+        <NavLink className={navClass} to="/cards">
+          <span className="ico">▭</span>Карты
+        </NavLink>
         <NavLink className={navClass} to="/rules">
           <span className="ico">◎</span>Правила
         </NavLink>

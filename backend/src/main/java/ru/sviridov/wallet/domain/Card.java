@@ -10,10 +10,12 @@ import jakarta.persistence.Table;
 import java.time.Instant;
 
 /**
- * A bank card owned by a user. Cards are created automatically when a statement
- * is imported: the full masked {@code cardNumber} extracted from the PDF is the
- * natural identity, and {@code last4} is derived from it for display. Users can
- * rename the card's display name but do not manage cards manually.
+ * A bank card owned by a user. Cards are usually created automatically when a
+ * statement is imported: the full masked {@code cardNumber} extracted from the
+ * PDF is the natural identity, and {@code last4} is derived from it for display.
+ * The user can also add, rename and delete cards by hand from the "Карты" page.
+ * Deleting a card cascades to its statements, transactions and statement gaps
+ * (the FKs in {@code V2__full_schema.sql} are {@code ON DELETE CASCADE}).
  */
 @Entity
 @Table(name = "cards")
@@ -77,6 +79,12 @@ public class Card {
 
     public String getCardNumber() {
         return cardNumber;
+    }
+
+    /** Changing the number also re-derives {@code last4}, the matching key. */
+    public void setCardNumber(String cardNumber) {
+        this.cardNumber = cardNumber;
+        this.last4 = last4(cardNumber);
     }
 
     public String getLast4() {

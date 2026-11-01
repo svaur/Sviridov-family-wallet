@@ -43,9 +43,19 @@ public class PdfBoxStatementParser implements StatementParser {
     private static final Pattern P_ROW_NUM = Pattern.compile("^\\d{1,4}$");
     private static final Pattern P_DATE = Pattern.compile("^\\d{2}\\.\\d{2}\\.\\d{4}$");
     private static final Pattern P_MONEY = Pattern.compile("^\\d+(?:[.,]\\d{2})$");
+    /** Max horizontal distance between an amount and its "Расход"/"Приход" column header. */
     private static final float COLUMN_TOLERANCE = 60f;
+    /** Tokens whose y differs by less than this belong to the same visual line. */
     private static final float LINE_TOLERANCE = 5f;
+    /**
+     * The footer ("10 18183.86 14300.0") starts with a number too, so a line only
+     * begins a row when its first token is close to the "Номер" header column.
+     */
     private static final float ROW_NUMBER_TOLERANCE = 30f;
+    /**
+     * A line is a continuation of the previous row's "Назначение платежа" when all
+     * its tokens sit at or right of the purpose column (wrapped long purposes).
+     */
     private static final float PURPOSE_TOLERANCE = 15f;
 
     @Override

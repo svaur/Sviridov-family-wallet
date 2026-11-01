@@ -2,6 +2,8 @@ package ru.sviridov.wallet.parser;
 
 import org.junit.jupiter.api.Test;
 
+import java.awt.Color;
+import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.math.BigDecimal;
@@ -173,23 +175,28 @@ class ScreenshotParserTest {
     }
 
     @Test
-    void reportsUnrecognizedOrphanedLines() {
-        // Merchant + category without a nearby amount are grouped into one
-        // unrecognised-row entry; the status-bar clock is treated as noise.
+    void keepsRowWithZeroAmountWhenAmountIsMissing() {
+        // A line with text but no amount is an operation with an unknown amount:
+        // it is kept with 0 and a warning downstream, because deleting an extra row
+        // in the wizard is cheaper than re-typing a missing operation. The
+        // status-bar clock is still treated as noise.
         List<OcrLine> lines = List.of(
                 new OcrLine("22:40", 0.05f, 0.01f), // status-bar clock → noise
                 new OcrLine("Банк Карта • 4242", 0.05f, 0.05f),
                 new OcrLine("Сегодня", 0.05f, 0.20f),
-                new OcrLine("Магазин", 0.20f, 0.24f),    // orphan (amount missing)
-                new OcrLine("Продукты", 0.20f, 0.26f),   // orphan, same operation
+                new OcrLine("Магазин", 0.20f, 0.24f),    // no amount
+                new OcrLine("Продукты", 0.20f, 0.26f),   // its details line
                 new OcrLine("Кофейня", 0.20f, 0.40f),
                 new OcrLine("-450 руб", 0.75f, 0.405f));
 
         ParsedStatement st = parser.parseLines(lines, REF);
 
-        assertThat(st.rows()).hasSize(1);
-        assertThat(st.rows().get(0).operation()).isEqualTo("Кофейня");
-        assertThat(st.unrecognizedRows()).containsExactly("Магазин Продукты");
+        assertThat(st.rows()).hasSize(2);
+        assertThat(st.rows().get(0).operation()).isEqualTo("Магазин Продукты");
+        assertThat(st.rows().get(0).expense()).isEqualByComparingTo(BigDecimal.ZERO);
+        assertThat(st.rows().get(1).operation()).isEqualTo("Кофейня");
+        assertThat(st.rows().get(1).expense()).isEqualByComparingTo(new BigDecimal("450"));
+        assertThat(st.unrecognizedRows()).isEmpty();
     }
 
     @Test
@@ -336,6 +343,27 @@ class ScreenshotParserTest {
     }
 
     @Test
+    void parseTsvReClustersMergedLinesByYAndKeepsBothAmounts() {
+        // Tesseract merges two adjacent visual lines into ONE "line" key (the
+        // icon gutter confuses its column detection), but their y coordinates
+        // differ. Re-clustering by y keeps each amount, so both operations survive.
+        String tsv = String.join("\n",
+                "level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext",
+                "5\t1\t1\t1\t1\t1\t50\t100\t120\t20\t95\tМагазин",
+                "5\t1\t1\t1\t1\t2\t430\t100\t40\t20\t95\t-2",
+                "5\t1\t1\t1\t1\t3\t470\t100\t90\t20\t95\t980,74₽",
+                "5\t1\t1\t1\t1\t4\t50\t130\t120\t20\t95\tПрочие товары",
+                "5\t1\t1\t1\t1\t5\t430\t160\t40\t20\t95\t-3",
+                "5\t1\t1\t1\t1\t6\t470\t160\t70\t20\t95\t000₽",
+                "5\t1\t1\t1\t1\t7\t50\t160\t120\t20\t95\tМежду счетами");
+
+        List<OcrLine> lines = ScreenshotParser.parseTsv(tsv, 1000, 800);
+
+        assertThat(lines.stream().map(OcrLine::text)).containsExactly(
+                "Магазин", "-2 980,74₽", "Прочие товары", "Между счетами", "-3 000₽");
+    }
+
+    @Test
     void parseLinesParsesAttachedRubleMarkerAmount() {
         // "511р" (no space) is a common OCR output for "511 ₽". The whole number
         // must be kept as 511, not read as "5.00" or split into "5"+"11".
@@ -378,6 +406,34 @@ class ScreenshotParserTest {
         ParsedStatement st = parser.parseLines(lines, REF);
         assertThat(st.rows()).hasSize(1);
         assertThat(st.rows().get(0).operation()).isEqualTo("Кафе Вкусно сеть 7 Acme Group Inc.");
+    }
+
+    @Test
+    void segmentationSplitsOperationsAtBlankBands() {
+        // Dark 540×400 image: two 2-line operations separated by a large blank band.
+        int w = 540;
+        int h = 400;
+        BufferedImage img = new BufferedImage(w, h, BufferedImage.TYPE_BYTE_GRAY);
+        Graphics2D g = img.createGraphics();
+        g.setColor(Color.BLACK);
+        g.fillRect(0, 0, w, h);
+        g.setColor(Color.WHITE);
+        int x0 = 100; // text column only (icon gutter left dark)
+        // operation 1: title 50-70, gap 9, details 80-95
+        g.fillRect(x0, 50, w - x0, 21);
+        g.fillRect(x0, 80, w - x0, 16);
+        // operation 2: title 130-150, gap 9, details 160-175
+        g.fillRect(x0, 130, w - x0, 21);
+        g.fillRect(x0, 160, w - x0, 16);
+        g.dispose();
+
+        List<ScreenshotParser.Unit> units = ScreenshotParser.segmentUnits(img);
+
+        assertThat(units).hasSize(2);
+        assertThat(units.get(0).y0).isEqualTo(50);
+        assertThat(units.get(0).y1).isEqualTo(95);
+        assertThat(units.get(1).y0).isEqualTo(130);
+        assertThat(units.get(1).y1).isEqualTo(175);
     }
 
     private static boolean tesseractAvailable() {

@@ -45,6 +45,8 @@ export function StatementsPage() {
   const [renamingCardId, setRenamingCardId] = useState<number | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const [gaps, setGaps] = useState<Gap[]>([])
+  const [deletingId, setDeletingId] = useState<number | null>(null)
+  const [msg, setMsg] = useState<string | null>(null)
 
   async function load() {
     setLoading(true)
@@ -89,6 +91,22 @@ export function StatementsPage() {
     }
   }
 
+  async function deleteStatement(id: number) {
+    if (!window.confirm('Удалить выписку и все импортированные из неё операции?')) return
+    setError(null)
+    setMsg(null)
+    setDeletingId(id)
+    try {
+      const n = await api.del<number>(`/api/statements/${id}`)
+      setMsg(`Выписка удалена, операций: ${n}`)
+      await load()
+    } catch (e) {
+      setError(e instanceof HttpError ? e.message : 'Не удалось удалить выписку')
+    } finally {
+      setDeletingId(null)
+    }
+  }
+
   const visible = cardFilter
     ? statements.filter((s) => s.cardId === Number(cardFilter))
     : statements
@@ -105,10 +123,14 @@ export function StatementsPage() {
     <div className="page">
       <div className="page-head">
         <h1>Выписки</h1>
-        <Link className="link-btn filled" to="/import">+ Загрузить выписку</Link>
+        <div className="group">
+          <Link className="link-btn filled" to="/import">+ Загрузить выписку</Link>
+          <Link className="link-btn" to="/import?kind=screenshot">+ Загрузить скрин ленты</Link>
+        </div>
       </div>
 
       {error && <div className="error">{error}</div>}
+      {msg && <div className="success">{msg}</div>}
 
       <section className="card">
         <h2>Загрузка выписки из PDF</h2>
@@ -119,7 +141,7 @@ export function StatementsPage() {
           <span>→</span>
           <span>3. <b>Подтвердить импорт</b></span>
         </div>
-        <p className="muted">PDF до 10 МБ. Карта создаётся автоматически по номеру из выписки, сам файл не хранится.</p>
+        <p className="muted">PDF до 10 МБ. Карта создаётся автоматически по номеру из выписки, сам файл не хранится. Если банк формирует выписку некорректно, можно загрузить скриншот ленты операций.</p>
       </section>
 
       {lastGap && (
@@ -156,6 +178,7 @@ export function StatementsPage() {
                 <th>Карта</th>
                 <th>Строк</th>
                 <th>Статус</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -195,12 +218,21 @@ export function StatementsPage() {
                     <td>
                       <span className={`badge ${statusBadge(s.status)}`}>{s.status}</span>
                     </td>
+                    <td>
+                      <button
+                        className="btn-danger btn-sm"
+                        disabled={deletingId === s.id}
+                        onClick={() => deleteStatement(s.id)}
+                      >
+                        {deletingId === s.id ? 'Удаление…' : 'Удалить'}
+                      </button>
+                    </td>
                   </tr>
                 )
               })}
               {visible.length === 0 && (
                 <tr>
-                  <td colSpan={5}>Выписок пока нет</td>
+                  <td colSpan={6}>Выписок пока нет</td>
                 </tr>
               )}
             </tbody>

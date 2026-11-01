@@ -159,6 +159,7 @@ export function TransactionsPage() {
 
   function sourceLabel(t: Transaction): string {
     if (t.source === 'statement') return 'выписка'
+    if (t.source === 'screenshot') return 'скриншот'
     if (t.source === 'cash') return 'наличные'
     if (t.source === 'other') return 'другое'
     const c = cards.find((x) => x.id === t.cardId)
@@ -167,6 +168,7 @@ export function TransactionsPage() {
 
   function badgeClass(source: string): string {
     if (source === 'statement') return 'badge-statement'
+    if (source === 'screenshot') return 'badge-screenshot'
     if (source === 'card') return 'badge-card'
     if (source === 'cash') return 'badge-cash'
     return 'badge-other'

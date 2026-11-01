@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useState, type FormEvent } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { api, HttpError } from '../api'
 import { CategoryPicker } from '../components/CategoryPicker'
 import { RuleQuickForm, type RulePrefill } from '../components/RuleQuickForm'
@@ -59,7 +59,17 @@ function accountShort(account: string | null): string | null {
   return `${account.slice(0, 8)}…${account.slice(-4)}`
 }
 
+function todayISO(): string {
+  const now = new Date()
+  const y = now.getFullYear()
+  const m = String(now.getMonth() + 1).padStart(2, '0')
+  const d = String(now.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+
 export function ImportPage() {
+  const [searchParams] = useSearchParams()
+  const isScreenshot = searchParams.get('kind') === 'screenshot'
   const [step, setStep] = useState(1)
   const [file, setFile] = useState<File | null>(null)
   const [preview, setPreview] = useState<Preview | null>(null)
@@ -70,6 +80,16 @@ export function ImportPage() {
   const [categories, setCategories] = useState<Category[]>([])
   const [expandedRow, setExpandedRow] = useState<number | null>(null)
   const [rulePrefill, setRulePrefill] = useState<RulePrefill | null>(null)
+  const [cardInput, setCardInput] = useState('')
+  const [editRow, setEditRow] = useState<number | null>(null)
+  const [editOperation, setEditOperation] = useState('')
+  const [editAmount, setEditAmount] = useState('')
+  const [editDate, setEditDate] = useState('')
+  const [addOpen, setAddOpen] = useState(false)
+  const [addOperation, setAddOperation] = useState('')
+  const [addAmount, setAddAmount] = useState('')
+  const [addType, setAddType] = useState<'debit' | 'credit'>('debit')
+  const [addDate, setAddDate] = useState(todayISO())
 
   useEffect(() => {
     api
@@ -87,7 +107,8 @@ export function ImportPage() {
     }
     setLoading(true)
     try {
-      setPreview(await api.upload<Preview>('/api/statements/preview', file))
+      const kind = isScreenshot ? 'screenshot' : 'statement'
+      setPreview(await api.upload<Preview>(`/api/statements/preview?kind=${kind}`, file))
       setStep(2)
     } catch (err) {
       setError(err instanceof HttpError ? err.message : 'Не удалось разобрать выписку')
@@ -111,10 +132,15 @@ export function ImportPage() {
 
   async function onConfirm() {
     if (!preview) return
+    if (!last4(preview.cardNumber) && !cardInput.trim()) {
+      setError('Укажите номер карты')
+      return
+    }
     setLoading(true)
     setError(null)
     try {
-      setResult(await api.post<ImportResult>(`/api/statements/preview/${preview.draftId}/confirm`))
+      const query = last4(preview.cardNumber) ? '' : `?cardNumber=${encodeURIComponent(cardInput.trim())}`
+      setResult(await api.post<ImportResult>(`/api/statements/preview/${preview.draftId}/confirm${query}`))
       setStep(4)
     } catch (err) {
       setError(err instanceof HttpError ? err.message : 'Не удалось импортировать выписку')
@@ -130,6 +156,52 @@ export function ImportPage() {
       setExpandedRow(rowNumber)
     }
     setRulePrefill(null)
+    setEditRow(null)
+  }
+
+  function startEdit(tx: PreviewTx) {
+    setEditRow(tx.rowNumber)
+    setEditOperation(tx.operation ?? '')
+    setEditAmount(String(tx.amount))
+    setEditDate(tx.date)
+    setRulePrefill(null)
+  }
+
+  async function saveEdit(tx: PreviewTx) {
+    if (!preview) return
+    setError(null)
+    try {
+      setPreview(
+        await api.put<Preview>(
+          `/api/statements/preview/${preview.draftId}/transactions/${tx.rowNumber}`,
+          { operation: editOperation, amount: Number(editAmount), date: editDate },
+        ),
+      )
+      setEditRow(null)
+    } catch (err) {
+      setError(err instanceof HttpError ? err.message : 'Не удалось сохранить операцию')
+    }
+  }
+
+  async function addRow() {
+    if (!preview) return
+    setError(null)
+    try {
+      setPreview(
+        await api.post<Preview>(`/api/statements/preview/${preview.draftId}/transactions`, {
+          operation: addOperation,
+          amount: Number(addAmount),
+          type: addType,
+          date: addDate,
+        }),
+      )
+      setAddOpen(false)
+      setAddOperation('')
+      setAddAmount('')
+      setAddType('debit')
+    } catch (err) {
+      setError(err instanceof HttpError ? err.message : 'Не удалось добавить операцию')
+    }
   }
 
   async function assignCategory(tx: PreviewTx, categoryId: number) {
@@ -176,7 +248,7 @@ export function ImportPage() {
 
   return (
     <div className="page">
-      <h1>Загрузка выписки</h1>
+      <h1>{isScreenshot ? 'Загрузка скрина ленты операций' : 'Загрузка выписки'}</h1>
 
       <div className="stepper">
         <span className={`step ${step > 1 ? 'done' : step === 1 ? 'active' : ''}`}>
@@ -192,17 +264,29 @@ export function ImportPage() {
         </span>
       </div>
 
+      {isScreenshot && (
+        <div className="warning">
+          ⚠ При импорте скриншота данные загружаются не полностью, предпочтительнее загрузить выписку с полными данными.
+        </div>
+      )}
+
       {error && <div className="error">{error}</div>}
 
       {step === 1 && (
         <section className="card">
           <h2>Выберите файл</h2>
           <p className="muted">
-            PDF-выписка банка, до 10 МБ. Карта создаётся автоматически по номеру из выписки, сам файл не хранится.
+            {isScreenshot
+              ? 'Скриншот ленты операций мобильного банка (PNG или JPG), до 10 МБ. Распознаётся текст и суммы; поле «назначение платежа» останется пустым.'
+              : 'PDF-выписка банка, до 10 МБ. Карта создаётся автоматически по номеру из выписки, сам файл не хранится.'}
           </p>
           <form onSubmit={onChooseFile}>
             <div className="row">
-              <input type="file" accept="application/pdf" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+              <input
+                type="file"
+                accept={isScreenshot ? 'image/*' : 'application/pdf'}
+                onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              />
               <button type="submit" disabled={loading || !file}>
                 {loading ? 'Разбор…' : 'Загрузить'}
               </button>
@@ -217,7 +301,16 @@ export function ImportPage() {
             <div className="meta">
               <div className="m">
                 <span>Карта</span>
-                <b>{last4(preview.cardNumber) ? `•••• ${last4(preview.cardNumber)}` : '—'}</b>
+                {last4(preview.cardNumber) ? (
+                  <b>•••• {last4(preview.cardNumber)}</b>
+                ) : (
+                  <input
+                    type="text"
+                    value={cardInput}
+                    onChange={(e) => setCardInput(e.target.value)}
+                    placeholder="введите номер карты"
+                  />
+                )}
               </div>
               <div className="m">
                 <span>Период</span>
@@ -235,6 +328,21 @@ export function ImportPage() {
               </div>
             </div>
 
+            {preview.unrecognizedRows.length > 0 && (
+              <>
+                <p className="warning">Не распознано строк: {preview.unrecognizedRows.length}</p>
+                <ul>
+                  {preview.unrecognizedRows.map((r, i) => (
+                    <li key={i} className="error">{r}</li>
+                  ))}
+                </ul>
+              </>
+            )}
+            {!last4(preview.cardNumber) && (
+              <div className="warning">
+                ⚠ Не удалось определить номер карты — введите его в поле «Карта» выше.
+              </div>
+            )}
             {uncategorizedCount > 0 && (
               <div className="warning">
                 ⚠ {uncategorizedCount} операций без категории — можно назначить вручную или создать правило.
@@ -254,6 +362,64 @@ export function ImportPage() {
             <p className="muted">
               Нажмите на операцию, чтобы назначить категорию, создать правило по примеру или удалить её из выгрузки.
             </p>
+
+            <div className="tx-actions">
+              <button className="btn-secondary" onClick={onRecategorize} disabled={loading}>
+                Применить правила
+              </button>
+              {isScreenshot && (
+                <button className="btn-secondary" onClick={() => setAddOpen(!addOpen)}>
+                  {addOpen ? 'Скрыть форму' : 'Добавить строку'}
+                </button>
+              )}
+              <Link className="link-btn" to="/rules" target="_blank" rel="noreferrer">
+                Создать / изменить правила
+              </Link>
+            </div>
+
+            {isScreenshot && addOpen && (
+              <div className="rule-quick-form">
+                <div className="form-grid">
+                  <label className="field">
+                    <span>Наименование</span>
+                    <input
+                      type="text"
+                      value={addOperation}
+                      onChange={(e) => setAddOperation(e.target.value)}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Сумма</span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0.01"
+                      value={addAmount}
+                      onChange={(e) => setAddAmount(e.target.value)}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Тип</span>
+                    <select value={addType} onChange={(e) => setAddType(e.target.value as 'debit' | 'credit')}>
+                      <option value="debit">Расход</option>
+                      <option value="credit">Приход</option>
+                    </select>
+                  </label>
+                  <label className="field">
+                    <span>Дата</span>
+                    <input type="date" value={addDate} onChange={(e) => setAddDate(e.target.value)} />
+                  </label>
+                </div>
+                <div className="actions">
+                  <button className="btn-sm" onClick={addRow}>
+                    Добавить
+                  </button>
+                  <button type="button" className="btn-secondary btn-sm" onClick={() => setAddOpen(false)}>
+                    Отмена
+                  </button>
+                </div>
+              </div>
+            )}
 
             <table className="table">
               <thead>
@@ -300,6 +466,12 @@ export function ImportPage() {
                             />
                             <button
                               className="btn-secondary btn-sm"
+                              onClick={() => (editRow === tx.rowNumber ? setEditRow(null) : startEdit(tx))}
+                            >
+                              {editRow === tx.rowNumber ? 'Скрыть правку' : 'Изменить'}
+                            </button>
+                            <button
+                              className="btn-secondary btn-sm"
                               onClick={() => (rulePrefill ? setRulePrefill(null) : createRuleFrom(tx))}
                             >
                               {rulePrefill ? 'Скрыть форму' : 'Создать правило'}
@@ -308,6 +480,50 @@ export function ImportPage() {
                               Удалить
                             </button>
                           </div>
+                          {editRow === tx.rowNumber && (
+                            <div className="rule-quick-form">
+                              <div className="form-grid">
+                                <label className="field">
+                                  <span>Наименование</span>
+                                  <input
+                                    type="text"
+                                    value={editOperation}
+                                    onChange={(e) => setEditOperation(e.target.value)}
+                                  />
+                                </label>
+                                <label className="field">
+                                  <span>Сумма</span>
+                                  <input
+                                    type="number"
+                                    step="0.01"
+                                    min="0.01"
+                                    value={editAmount}
+                                    onChange={(e) => setEditAmount(e.target.value)}
+                                  />
+                                </label>
+                                <label className="field">
+                                  <span>Дата</span>
+                                  <input
+                                    type="date"
+                                    value={editDate}
+                                    onChange={(e) => setEditDate(e.target.value)}
+                                  />
+                                </label>
+                              </div>
+                              <div className="actions">
+                                <button className="btn-sm" onClick={() => saveEdit(tx)}>
+                                  Сохранить
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn-secondary btn-sm"
+                                  onClick={() => setEditRow(null)}
+                                >
+                                  Отмена
+                                </button>
+                              </div>
+                            </div>
+                          )}
                           {rulePrefill && (
                             <RuleQuickForm
                               categories={categories}
@@ -336,14 +552,6 @@ export function ImportPage() {
 
             <div className="wizard-footer">
               <div className="group">
-                <button className="btn-secondary" onClick={onRecategorize} disabled={loading}>
-                  Применить правила
-                </button>
-                <Link className="link-btn" to="/rules" target="_blank" rel="noreferrer">
-                  Создать / изменить правила
-                </Link>
-              </div>
-              <div className="group">
                 <button className="btn-secondary" onClick={() => setStep(1)}>
                   Назад
                 </button>
@@ -361,15 +569,14 @@ export function ImportPage() {
             Будет импортировано <strong>{preview.validCount - preview.skippedDuplicates}</strong> операций
             (пропущено дубликатов: {preview.skippedDuplicates}).
           </p>
-          {preview.unrecognizedRows.length > 0 && (
-            <ul>
-              {preview.unrecognizedRows.map((r, i) => (
-                <li key={i} className="error">
-                  {r}
-                </li>
-              ))}
-            </ul>
-          )}
+          <p>
+            Карта:{' '}
+            <strong>
+              {last4(preview.cardNumber)
+                ? `•••• ${last4(preview.cardNumber)}`
+                : `•••• ${last4(cardInput) || '—'}`}
+            </strong>
+          </p>
           <div className="wizard-footer">
             <button className="btn-secondary" onClick={() => setStep(2)}>
               Назад
@@ -389,6 +596,18 @@ export function ImportPage() {
               Статус: <strong>{result.status}</strong> · импортировано {result.importedCount} · пропущено дубликатов{' '}
               {result.skippedDuplicates}
             </p>
+            {result.unrecognizedRows.length > 0 && (
+              <>
+                <p className="warning">Не распознано строк: {result.unrecognizedRows.length}</p>
+                <ul>
+                  {result.unrecognizedRows.map((r, i) => (
+                    <li key={i} className="error">
+                      {r}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
           </div>
           <Link className="link-btn" to="/statements">
             К списку выписок
